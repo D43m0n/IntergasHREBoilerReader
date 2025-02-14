@@ -22,6 +22,45 @@ DEVICE_MANUFACTURER = "Intergas"
 
 MQTT_BASE_TOPIC = f"boiler/{DEVICE_ID}"
 
+SENSORS = {
+    "flow_temp": {
+        "name": "Flow Temperature",
+        "device_class": "temperature",
+        "unit_of_measurement": "°C",
+        "state_class": "measurement"
+    },
+    "return_temp": {
+        "name": "Return Temperature",
+        "device_class": "temperature",
+        "unit_of_measurement": "°C",
+        "state_class": "measurement"
+    },
+    "dhw_temp": {
+        "name": "Hot Water Temperature",
+        "device_class": "temperature",
+        "unit_of_measurement": "°C",
+        "state_class": "measurement"
+    },
+    "temp_set": {
+        "name": "Temperature Setpoint",
+        "device_class": "temperature",
+        "unit_of_measurement": "°C",
+        "state_class": "measurement"
+    },
+    "fan_speed": {
+        "name": "Burner Fan Speed",
+        "device_class": "frequency",
+        "unit_of_measurement": "rpm",
+        "state_class": "measurement"
+    },
+    "status": {
+        "name": "Status",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None
+    }
+}
+
 class MQTTHandler:
     def __init__(self, mqtt_user, mqtt_password):
         print("Initializing MQTT client...")
@@ -37,6 +76,7 @@ class MQTTHandler:
         self.setup_done = False
         self.client.will_set(f"{MQTT_BASE_TOPIC}/status", "offline", retain=True)
         self.reconnect_count = 0
+        self.cached_values = {}  # Cache last published values to avoid sending out unnecessary messages to mqtt
 
     def connect(self):
         try:
@@ -67,41 +107,8 @@ class MQTTHandler:
             "manufacturer": DEVICE_MANUFACTURER
         }
 
-        sensors = {
-            "flow_temp": {
-                "name": "Flow Temperature",
-                "device_class": "temperature",
-                "unit_of_measurement": "°C",
-                "state_class": "measurement"
-            },
-            "return_temp": {
-                "name": "Return Temperature",
-                "device_class": "temperature",
-                "unit_of_measurement": "°C",
-                "state_class": "measurement"
-            },
-            "dhw_temp": {
-                "name": "Hot Water Temperature",
-                "device_class": "temperature",
-                "unit_of_measurement": "°C",
-                "state_class": "measurement"
-            },
-            "fan_speed": {
-                "name": "Burner Fan Speed",
-                "device_class": "frequency",
-                "unit_of_measurement": "rpm",
-                "state_class": "measurement"
-            },
-            "status": {
-                "name": "Status",
-                "device_class": None,
-                "unit_of_measurement": None,
-                "state_class": None
-            }
-        }
-
         # Register sensors
-        for sensor_id, config in sensors.items():
+        for sensor_id, config in SENSORS.items():
             sensor_config = {
                 "name": config['name'],
                 "unique_id": sensor_id,
@@ -119,19 +126,23 @@ class MQTTHandler:
             )
 
     def publish_data(self, data):
-        """Publish boiler data to MQTT topics"""
-        # Publish sensor values
-        # self.client.publish(f"{MQTT_BASE_TOPIC}/temp_setpoint/state", f"{data['temp_set']:.1f}")
-        self.client.publish(f"{MQTT_BASE_TOPIC}/flow_temp/state", f"{data['flow_temp']:.1f}")
-        self.client.publish(f"{MQTT_BASE_TOPIC}/return_temp/state", f"{data['return_temp']:.1f}")
-        self.client.publish(f"{MQTT_BASE_TOPIC}/dhw_temp/state", f"{data['dhw_temp']:.1f}")
-        # self.client.publish(f"{MQTT_BASE_TOPIC}/outside_temp/state", f"{data['outside_temp']:.1f}")
-        # self.client.publish(f"{MQTT_BASE_TOPIC}/pressure/state", f"{data['pressure']:.1f}")
-        self.client.publish(f"{MQTT_BASE_TOPIC}/fan_speed/state", f"{data['fan_speed']:.0f}")
-        self.client.publish(f"{MQTT_BASE_TOPIC}/status/state", data['status'])
+        """Publish boiler data to MQTT topics only when values change"""
+        for key in SENSORS.keys():
+            if key not in data:
+                continue
+
+            value = data[key]
+            # print(f"Debug - Publishing {key}: {value}")
+            topic = f"{MQTT_BASE_TOPIC}/{key}/state"
+
+            current_state = str(value)
+            if key not in self.cached_values or current_state != self.cached_values[key]:
+                self.client.publish(topic, current_state)
+                self.cached_values[key] = current_state
 
 c_uint8 = ctypes.c_uint8
 
+# Byte 27 flags
 class B27Flags_bits(ctypes.LittleEndianStructure):
     _fields_ = [
             ("gp_switch", c_uint8, 1),
@@ -148,6 +159,7 @@ class B27Flags(ctypes.Union):
     _fields_ = [("b", B27Flags_bits),
                 ("asbyte", c_uint8)]
 
+# Byte 29 flags
 class B29Flags_bits(ctypes.LittleEndianStructure):
     _fields_ = [
             ("gasvalve", c_uint8, 1),
@@ -178,12 +190,12 @@ def parse_packet(s):
             f = float(msb * 265 + lsb) / 100
         return f
 
-    t1 = getFloat(d[1],d[0])  # Rookgassensor (?)
-    t2 = getFloat(d[3],d[2])  # Aanvoersensor S1
-    t3 = getFloat(d[5],d[4])  # Retoursensor S2
-    t4 = getFloat(d[7],d[6])  # Warmwatersensor S3
-    t5 = getFloat(d[9],d[8])  # Boilersensor S4
-    t6 = getFloat(d[11],d[10])  # buitenvoeler (?)
+    t1 = getFloat(d[1],d[0])    # exhaust temperature (?)
+    t2 = getFloat(d[3],d[2])    # flow temperature
+    t3 = getFloat(d[5],d[4])    # return temperature
+    t4 = getFloat(d[7],d[6])    # hot water temperature
+    t5 = getFloat(d[9],d[8])    # boiler temperature (?)
+    t6 = getFloat(d[11],d[10])  # outside temp (?)
     ch_pressure = getFloat(d[13],d[12])
     temp_set = getFloat(d[15],d[14])
     fanspeed_set = getFloat(d[17],d[16]) * 100
@@ -228,35 +240,37 @@ def parse_packet(s):
     }
     status = status_codes.get(displ_code, f"Unknown ({displ_code})")
 
-    return {
+    data = {
         'status': status,
-        'flow_temp': t2,
-        'return_temp': t3,
-        'dhw_temp': t4,
-        'outside_temp': t6,
+        'flow_temp': round(t2, 1),
+        'return_temp': round(t3, 1),
+        'dhw_temp': round(t4, 1),
+        'outside_temp': round(t6, 1),
         'pressure': ch_pressure,
-        'temp_set': temp_set,
+        'temp_set': round(temp_set, 1),
         'fan_speed': fanspeed,
         'fan_speed_set': fanspeed_set,
+        'fan_pwm': fan_pwm,
+        'io_current': io_curr,
+        'gp_switch': gp_switch,
+        'tap_switch': tap_switch,
+        'room_therm': roomtherm,
         'pump_active': pump,
-        'flame_on': gasvalve,
+        'dhw_active': dwk,
+        'alarm_status': alarm_status,
+        'ch_cascade_relay': ch_cascade_relay,
         'opentherm': opentherm,
-        'raw_values': [t1, t2, t3, t4, t5, t6, ch_pressure, temp_set, fanspeed_set, fanspeed, fan_pwm,
-                      io_curr, gp_switch, tap_switch, roomtherm, pump, dwk, alarm_status, ch_cascade_relay, opentherm,
-                      gasvalve, spark, io_signal, ch_ot_disabled, low_water_pressure, pressure_sensor, burner_block, grad_flag,
-                      ch_pressure]
+        'flame_on': gasvalve,
+        'spark': spark,
+        'io_signal': io_signal,
+        'ch_ot_disabled': ch_ot_disabled,
+        'low_water_pressure': low_water_pressure,
+        'pressure_sensor': pressure_sensor,
+        'burner_block': burner_block,
+        'grad_flag': grad_flag
     }
 
-def parse_file(csvfile):
-    with open(csvfile, "r") as fh:
-        reader = csv.reader(fh, delimiter=";", lineterminator='\n')
-        for row in reader:
-            # Update to handle base64 encoding in Python 3
-            import base64
-            pkt = parse_packet(base64.b64decode(row[1]))
-            raw_values = pkt['raw_values']
-            print(" ".join(map(str, [row[0]] + raw_values)))
-
+    return data
 
 def display_readings(data):
     """Display current boiler readings in a readable format"""
@@ -283,7 +297,6 @@ def get_packet(port, mqtt_user, mqtt_password):
             with serial.Serial(port, 9600, timeout=2) as ser:
                 print(f"Connected to {port}")
                 while True:
-                    ts = time.time()
                     ser.write(b'S?\r')
                     s = ser.read(32)
                     if len(s) == 32:
@@ -293,7 +306,7 @@ def get_packet(port, mqtt_user, mqtt_password):
                     time.sleep(1)
         except serial.SerialException as e:
             print(f"Serial connection lost: {e}")
-            time.sleep(10)  # Wait before retry
+            time.sleep(10)
             continue
         except Exception as e:
             print(f"Unexpected error: {e}")
