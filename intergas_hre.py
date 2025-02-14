@@ -49,7 +49,7 @@ SENSORS = {
     },
     "fan_speed": {
         "name": "Burner Fan Speed",
-        "device_class": "frequency",
+        "device_class": "speed",
         "unit_of_measurement": "rpm",
         "state_class": "measurement"
     },
@@ -164,7 +164,7 @@ class B29Flags_bits(ctypes.LittleEndianStructure):
     _fields_ = [
             ("gasvalve", c_uint8, 1),
             ("spark", c_uint8, 1),
-            ("io_signal", c_uint8, 1),
+            ("ionisation_signal", c_uint8, 1),
             ("ch_ot_disabled", c_uint8, 1),
             ("low_water_pressure", c_uint8, 1),
             ("pressure_sensor", c_uint8, 1),
@@ -183,25 +183,43 @@ def parse_packet(s):
     else:
         d = list(map(ord, unpack('=cccccccccccccccccccccccccccccccc', s)))
 
-    def getFloat(msb, lsb):
-        if msb > 127:
-            f = -(float(msb ^ 255) + 1) * 256 - lsb / 100
-        else:
-            f = float(msb * 265 + lsb) / 100
-        return f
+    def convert_to_signed_word(msb, lsb):
+        """Convert MSB/LSB bytes to signed 16-bit integer"""
+        word = (msb << 8 | lsb)
+        # Convert to signed 16-bit
+        if word > 32767:
+            word -= 65536
+        return word
 
-    t1 = getFloat(d[1],d[0])    # exhaust temperature (?)
-    t2 = getFloat(d[3],d[2])    # flow temperature
-    t3 = getFloat(d[5],d[4])    # return temperature
-    t4 = getFloat(d[7],d[6])    # hot water temperature
-    t5 = getFloat(d[9],d[8])    # boiler temperature (?)
-    t6 = getFloat(d[11],d[10])  # outside temp (?)
+    def getFloat(msb, lsb):
+        word = convert_to_signed_word(msb, lsb)
+        return float(word) / 100.0
+
+    def getTemp(msb, lsb):
+        word = convert_to_signed_word(msb, lsb)
+        if word <= -5100 or word == 32767:  # 32767 is SHRT_MAX
+            # Intergas gives -5100 for disconnected sensors
+            return float('nan')
+
+        return float(word) / 100.0
+
+    def getInt(msb, lsb):
+        word = convert_to_signed_word(msb, lsb)
+        return float(word)
+
+    t1 = getTemp(d[1],d[0])    # heat exchanger temperature
+    t2 = getTemp(d[3],d[2])    # flow temperature
+    t3 = getTemp(d[5],d[4])    # return temperature
+    t4 = getTemp(d[7],d[6])    # hot water temperature
+    t5 = getTemp(d[9],d[8])    # boiler temperature (?)
+    t6 = getTemp(d[11],d[10])  # outside temp (?)
     ch_pressure = getFloat(d[13],d[12])
     temp_set = getFloat(d[15],d[14])
-    fanspeed_set = getFloat(d[17],d[16]) * 100
-    fanspeed = getFloat(d[19],d[18]) * 100
+    fanspeed_set = getInt(d[17],d[16])
+    fanspeed = getInt(d[19],d[18])
     fan_pwm = getFloat(d[21],d[20])
-    io_curr = getFloat(d[23],d[22])
+    ionisation_current = getFloat(d[23],d[22])
+    displ_code = d[24]
 
     flags = B27Flags()
     flags.asbyte = d[27]
@@ -218,40 +236,42 @@ def parse_packet(s):
     B29flags.asbyte = d[29]
     gasvalve = B29flags.b.gasvalve
     spark = B29flags.b.spark
-    io_signal = B29flags.b.io_signal
+    ionisation_signal = B29flags.b.ionisation_signal
     ch_ot_disabled = B29flags.b.ch_ot_disabled
     low_water_pressure = B29flags.b.low_water_pressure
     pressure_sensor = B29flags.b.pressure_sensor
     burner_block = B29flags.b.burner_block
     grad_flag = B29flags.b.grad_flag
 
-    ch_pressure = None
-    if not B29flags.b.pressure_sensor:
-        ch_pressure = -35
-    displ_code = d[24]
+    # if not B29flags.b.pressure_sensor:
+    #     ch_pressure = 0 # N/A
 
     # Add status code interpretation
     status_codes = {
-        51: "Hot water",
-        102: "CV Brandt",
+        51: "Recirculating tap water",
+        0: "Central Heating active (?)",
+        102: "Central Heating active",
         126: "Idle",
-        204: "Recirculate tap water",
-        231: "Recirculate heating water",
+        170: "Service mode",
+        204: "Hot water active",
+        231: "Central Heating ramp down",
     }
     status = status_codes.get(displ_code, f"Unknown ({displ_code})")
 
     data = {
         'status': status,
+        'heat_exchanger_temp': round(t1, 1),
         'flow_temp': round(t2, 1),
         'return_temp': round(t3, 1),
         'dhw_temp': round(t4, 1),
+        't5': round(t5, 1),
         'outside_temp': round(t6, 1),
         'pressure': ch_pressure,
         'temp_set': round(temp_set, 1),
         'fan_speed': fanspeed,
         'fan_speed_set': fanspeed_set,
         'fan_pwm': fan_pwm,
-        'io_current': io_curr,
+        'ionisation_current': ionisation_current,
         'gp_switch': gp_switch,
         'tap_switch': tap_switch,
         'room_therm': roomtherm,
@@ -262,37 +282,61 @@ def parse_packet(s):
         'opentherm': opentherm,
         'flame_on': gasvalve,
         'spark': spark,
-        'io_signal': io_signal,
+        'ionisation_signal': ionisation_signal,
         'ch_ot_disabled': ch_ot_disabled,
         'low_water_pressure': low_water_pressure,
         'pressure_sensor': pressure_sensor,
         'burner_block': burner_block,
-        'grad_flag': grad_flag
+        'grad_flag': grad_flag,
+        'byte_27_flags': f"{bin(d[27])[2:].zfill(8)}",
+        'byte_28_flags': f"{bin(d[28])[2:].zfill(8)}",
+        'byte_29_flags': f"{bin(d[29])[2:].zfill(8)}"
     }
 
     return data
 
+def prettify_key(key):
+    """Convert snake_case keys to Title Case with better readability"""
+    replacements = {
+        'dhw_': 'Hot_Water_',
+        'ch_': 'Heating_',
+        '_ot_': '_OpenTherm_',
+        'temp_': 'Temperature_',
+        '_temp': '_Temperature',
+        'gp_': 'GP_',
+        '_pwm': '_PWM'
+    }
+
+    # First replace known abbreviations
+    pretty = key.lower()
+    for old, new in replacements.items():
+        pretty = pretty.replace(old, new)
+
+    # Convert snake_case to Title Case
+    pretty = ' '.join(word.capitalize() for word in pretty.split('_'))
+
+    return pretty
+
 def display_readings(data):
     """Display current boiler readings in a readable format"""
     print("\033[2J\033[H")  # Clear screen and move cursor to top
-    print(f"Status: {data['status']}")
-    print(f"Flow Temperature: {data['flow_temp']:.1f}°C")
-    print(f"Return Temperature: {data['return_temp']:.1f}°C")
-    print(f"DHW Temperature: {data['dhw_temp']:.1f}°C")
-    # print(f"Outside Temperature: {data['outside_temp']:.1f}°C")
-    print(f"System Pressure: {data['pressure']:.1f} bar")
-    print(f"Temperature Setpoint: {data['temp_set']:.1f}°C")
-    print(f"OpenTherm: {data['opentherm']:.0f}")
-    print(f"Fan Speed: {data['fan_speed']:.0f} rpm (set: {data['fan_speed_set']:.0f} rpm)")
-    print(f"Pump: {'ON' if data['pump_active'] else 'OFF'}")
-    print(f"Flame: {'ON' if data['flame_on'] else 'OFF'}")
+    for key, value in sorted(data.items()):
+        pretty_key = prettify_key(key)
+        if isinstance(value, int):
+            print(f"{pretty_key}: {value:}")
+        elif isinstance(value, float):
+            print(f"{pretty_key}: {value:.1f}")
+        elif isinstance(value, bool):
+            print(f"{pretty_key}: {'ON' if value else 'OFF'}")
+        else:
+            print(f"{pretty_key}: {value}")
     print("\nPress Ctrl+C to stop...")
 
 def get_packet(port, mqtt_user, mqtt_password):
     mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
     mqtt_handler.connect()
 
-    while True:  # Add outer reconnection loop
+    while True:  # outer reconnection loop
         try:
             with serial.Serial(port, 9600, timeout=2) as ser:
                 print(f"Connected to {port}")
