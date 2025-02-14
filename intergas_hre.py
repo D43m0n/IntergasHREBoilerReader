@@ -2,11 +2,9 @@
 import argparse
 import csv
 import ctypes
-import glob
 import serial
 import sys
 import time
-import os
 import json
 import paho.mqtt.client as mqtt
 from struct import *
@@ -20,12 +18,13 @@ MQTT_DISCOVERY_PREFIX = "homeassistant"
 DEVICE_ID = "intergas_boiler"
 DEVICE_NAME = "Intergas Boiler"
 DEVICE_MODEL = "Kombi Kompakt HRE 36/30"
+DEVICE_MANUFACTURER = "Intergas"
 
+MQTT_BASE_TOPIC = f"boiler/{DEVICE_ID}"
 
 class MQTTHandler:
     def __init__(self, mqtt_user, mqtt_password):
         print("Initializing MQTT client...")
-        # Create MQTT client with explicit API version
         self.client = mqtt.Client(
             client_id=MQTT_CLIENT_ID,
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2
@@ -36,7 +35,7 @@ class MQTTHandler:
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
         self.setup_done = False
-        self.client.will_set(f"intergas/{DEVICE_ID}/status", "offline", retain=True)
+        self.client.will_set(f"{MQTT_BASE_TOPIC}/status", "offline", retain=True)
         self.reconnect_count = 0
 
     def connect(self):
@@ -60,72 +59,76 @@ class MQTTHandler:
         self.client.connect(MQTT_BROKER, MQTT_PORT)
 
     def setup_discovery(self):
-        """Set up Home Assistant MQTT discovery for the boiler device"""
+        """Setup Home Assistant MQTT discovery"""
         device_info = {
             "identifiers": [DEVICE_ID],
             "name": DEVICE_NAME,
             "model": DEVICE_MODEL,
-            "manufacturer": "Intergas",
+            "manufacturer": DEVICE_MANUFACTURER
         }
 
-        # Main climate control
-        climate_config = {
-            "name": f"{DEVICE_NAME} Climate",
-            "unique_id": f"{DEVICE_ID}_climate",
-            "device": device_info,
-            "current_temperature_topic": f"intergas/{DEVICE_ID}/flow_temp/state",
-            "temperature_state_topic": f"intergas/{DEVICE_ID}/temp_set/state",
-            "status_topic": f"intergas/{DEVICE_ID}/status/state",
-            "temperature_unit": "C",
-            "modes": ["heat", "off"],
-        }
-        self.client.publish(
-            f"{MQTT_DISCOVERY_PREFIX}/climate/{DEVICE_ID}/config",
-            json.dumps(climate_config),
-            retain=True
-        )
-
-        # Individual sensors
         sensors = {
-            "temp_setpoint": {"name": "Temperature Setpoint", "unit": "°C", "device_class": "temperature"},
-            "flow_temp": {"name": "Flow Temperature", "unit": "°C", "device_class": "temperature"},
-            "return_temp": {"name": "Return Temperature", "unit": "°C", "device_class": "temperature"},
-            "dhw_temp": {"name": "DHW Temperature", "unit": "°C", "device_class": "temperature"},
-            # "outside_temp": {"name": "Outside Temperature", "unit": "°C", "device_class": "temperature"},
-            # "pressure": {"name": "System Pressure", "unit": "bar", "device_class": "pressure"},
-            "fan_speed": {"name": "Fan Speed", "unit": "RPM"},
+            "flow_temp": {
+                "name": "Flow Temperature",
+                "device_class": "temperature",
+                "unit_of_measurement": "°C",
+                "state_class": "measurement"
+            },
+            "return_temp": {
+                "name": "Return Temperature",
+                "device_class": "temperature",
+                "unit_of_measurement": "°C",
+                "state_class": "measurement"
+            },
+            "dhw_temp": {
+                "name": "Hot Water Temperature",
+                "device_class": "temperature",
+                "unit_of_measurement": "°C",
+                "state_class": "measurement"
+            },
+            "fan_speed": {
+                "name": "Burner Fan Speed",
+                "device_class": "frequency",
+                "unit_of_measurement": "rpm",
+                "state_class": "measurement"
+            },
+            "status": {
+                "name": "Status",
+                "device_class": None,
+                "unit_of_measurement": None,
+                "state_class": None
+            }
         }
 
+        # Register sensors
         for sensor_id, config in sensors.items():
             sensor_config = {
-                "name": f"{DEVICE_NAME} {config['name']}",
-                "unique_id": f"{DEVICE_ID}_{sensor_id}",
-                "state_topic": f"intergas/{DEVICE_ID}/{sensor_id}/state",
-                "unit_of_measurement": config["unit"],
-                "device": device_info,
+                "name": config['name'],
+                "unique_id": sensor_id,
+                "device_class": config['device_class'],
+                "state_class": config['state_class'],
+                "unit_of_measurement": config['unit_of_measurement'],
+                "state_topic": f"{MQTT_BASE_TOPIC}/{sensor_id}/state",
+                "device": device_info
             }
-            if "device_class" in config:
-                sensor_config["device_class"] = config["device_class"]
 
             self.client.publish(
-                f"{MQTT_DISCOVERY_PREFIX}/sensor/{DEVICE_ID}_{sensor_id}/config",
+                f"{MQTT_DISCOVERY_PREFIX}/sensor/{DEVICE_ID}/{sensor_id}/config",
                 json.dumps(sensor_config),
                 retain=True
             )
 
     def publish_data(self, data):
         """Publish boiler data to MQTT topics"""
-        base_topic = f"intergas/{DEVICE_ID}"
-
         # Publish sensor values
-        self.client.publish(f"{base_topic}/temp_setpoint/state", f"{data['temp_set']:.1f}")
-        self.client.publish(f"{base_topic}/flow_temp/state", f"{data['flow_temp']:.1f}")
-        self.client.publish(f"{base_topic}/return_temp/state", f"{data['return_temp']:.1f}")
-        self.client.publish(f"{base_topic}/dhw_temp/state", f"{data['dhw_temp']:.1f}")
-        # self.client.publish(f"{base_topic}/outside_temp/state", f"{data['outside_temp']:.1f}")
-        # self.client.publish(f"{base_topic}/pressure/state", f"{data['pressure']:.1f}")
-        self.client.publish(f"{base_topic}/fan_speed/state", f"{data['fan_speed']:.0f}")
-        self.client.publish(f"{base_topic}/status/state", data['status'])
+        # self.client.publish(f"{MQTT_BASE_TOPIC}/temp_setpoint/state", f"{data['temp_set']:.1f}")
+        self.client.publish(f"{MQTT_BASE_TOPIC}/flow_temp/state", f"{data['flow_temp']:.1f}")
+        self.client.publish(f"{MQTT_BASE_TOPIC}/return_temp/state", f"{data['return_temp']:.1f}")
+        self.client.publish(f"{MQTT_BASE_TOPIC}/dhw_temp/state", f"{data['dhw_temp']:.1f}")
+        # self.client.publish(f"{MQTT_BASE_TOPIC}/outside_temp/state", f"{data['outside_temp']:.1f}")
+        # self.client.publish(f"{MQTT_BASE_TOPIC}/pressure/state", f"{data['pressure']:.1f}")
+        self.client.publish(f"{MQTT_BASE_TOPIC}/fan_speed/state", f"{data['fan_speed']:.0f}")
+        self.client.publish(f"{MQTT_BASE_TOPIC}/status/state", data['status'])
 
 c_uint8 = ctypes.c_uint8
 
