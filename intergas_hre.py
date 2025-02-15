@@ -35,13 +35,13 @@ SENSORS = {
         "unit_of_measurement": "°C",
         "state_class": "measurement"
     },
-    "dhw_temp": {
+    "hot_water_temp": {
         "name": "Hot Water Temperature",
         "device_class": "temperature",
         "unit_of_measurement": "°C",
         "state_class": "measurement"
     },
-    "temp_set": {
+    "temp_setpoint": {
         "name": "Temperature Setpoint",
         "device_class": "temperature",
         "unit_of_measurement": "°C",
@@ -140,42 +140,6 @@ class MQTTHandler:
                 self.client.publish(topic, current_state)
                 self.cached_values[key] = current_state
 
-c_uint8 = ctypes.c_uint8
-
-# Byte 27 flags
-class B27Flags_bits(ctypes.LittleEndianStructure):
-    _fields_ = [
-            ("gp_switch", c_uint8, 1),
-            ("tap_switch", c_uint8, 1),
-            ("roomtherm", c_uint8, 1),
-            ("pump", c_uint8, 1),
-            ("dwk", c_uint8, 1),
-            ("alarm_status", c_uint8, 1),
-            ("ch_cascade_relay", c_uint8, 1),
-            ("opentherm", c_uint8, 1),
-        ]
-
-class B27Flags(ctypes.Union):
-    _fields_ = [("b", B27Flags_bits),
-                ("asbyte", c_uint8)]
-
-# Byte 29 flags
-class B29Flags_bits(ctypes.LittleEndianStructure):
-    _fields_ = [
-            ("gasvalve", c_uint8, 1),
-            ("spark", c_uint8, 1),
-            ("ionisation_signal", c_uint8, 1),
-            ("ch_ot_disabled", c_uint8, 1),
-            ("low_water_pressure", c_uint8, 1),
-            ("pressure_sensor", c_uint8, 1),
-            ("burner_block", c_uint8, 1),
-            ("grad_flag", c_uint8, 1),
-        ]
-
-class B29Flags(ctypes.Union):
-    _fields_ = [("b", B29Flags_bits),
-                ("asbyte", c_uint8)]
-
 def parse_packet(s):
     # Convert bytes to list of integers if needed
     if isinstance(s, bytes):
@@ -205,7 +169,10 @@ def parse_packet(s):
 
     def getInt(msb, lsb):
         word = convert_to_signed_word(msb, lsb)
-        return float(word)
+        return int(word)
+
+    def get_bool(data, bit):
+        return bool(data & (1 << bit))
 
     t1 = getTemp(d[1],d[0])    # heat exchanger temperature
     t2 = getTemp(d[3],d[2])    # flow temperature
@@ -213,44 +180,52 @@ def parse_packet(s):
     t4 = getTemp(d[7],d[6])    # hot water temperature
     t5 = getTemp(d[9],d[8])    # boiler temperature (?)
     t6 = getTemp(d[11],d[10])  # outside temp (?)
-    ch_pressure = getFloat(d[13],d[12])
-    temp_set = getFloat(d[15],d[14])
+    water_pressure = getFloat(d[13],d[12])
+    temp_setpoint = getFloat(d[15],d[14])
     fanspeed_set = getInt(d[17],d[16])
     fanspeed = getInt(d[19],d[18])
     fan_pwm = getFloat(d[21],d[20])
     ionisation_current = getFloat(d[23],d[22])
     displ_code = d[24]
 
-    flags = B27Flags()
-    flags.asbyte = d[27]
-    gp_switch = flags.b.gp_switch
-    tap_switch = flags.b.tap_switch
-    roomtherm = flags.b.roomtherm
-    pump = flags.b.pump
-    dwk = flags.b.dwk
-    alarm_status = flags.b.alarm_status
-    ch_cascade_relay = flags.b.ch_cascade_relay
-    opentherm = flags.b.opentherm
+    # TO-DO: What's on byte 25?
 
-    B29flags = B29Flags()
-    B29flags.asbyte = d[29]
-    gasvalve = B29flags.b.gasvalve
-    spark = B29flags.b.spark
-    ionisation_signal = B29flags.b.ionisation_signal
-    ch_ot_disabled = B29flags.b.ch_ot_disabled
-    low_water_pressure = B29flags.b.low_water_pressure
-    pressure_sensor = B29flags.b.pressure_sensor
-    burner_block = B29flags.b.burner_block
-    grad_flag = B29flags.b.grad_flag
+    # bit flags from byte 26
+    gp_switch = get_bool(d[26], 0)
+    tap_switch = get_bool(d[26], 1)
+    roomtherm = get_bool(d[26], 2)
+    pump = get_bool(d[26], 3)
+    three_way_valve = get_bool(d[26], 4)
+    alarm_status = get_bool(d[26], 5)
+    ch_cascade_relay = get_bool(d[26], 6)
+    opentherm = get_bool(d[26], 7)
 
-    # if not B29flags.b.pressure_sensor:
-    #     ch_pressure = 0 # N/A
+    # TO-DO: What are the flags for byte 27 beyond fault code?
+
+    # bit flags from byte 28
+    gas_valve = get_bool(d[28], 0)
+    spark = get_bool(d[28], 1)
+    ionisation_signal = get_bool(d[28], 2)
+    opentherm_disabled = get_bool(d[28], 3)
+    low_water_pressure = get_bool(d[28], 4)
+    pressure_sensor = get_bool(d[28], 5)
+    burner_block = get_bool(d[28], 6)
+    gradient_flag = get_bool(d[28], 7)
+
+    if not pressure_sensor:
+        water_pressure = float('nan')
+
+    if get_bool(d[27], 7):
+        # last known fault code
+        fault_code = prettify_fault_code(d[29])
+    else:
+        fault_code = "None"
 
     # Add status code interpretation
     status_codes = {
         51: "Recirculating tap water",
-        0: "Central Heating active (?)",
-        102: "Central Heating active",
+        0: "Central Heating active (1)",
+        102: "Central Heating active (2)",
         126: "Idle",
         170: "Service mode",
         204: "Hot water active",
@@ -260,71 +235,79 @@ def parse_packet(s):
 
     data = {
         'status': status,
-        'heat_exchanger_temp': round(t1, 1),
+        'temp_setpoint': round(temp_setpoint, 1),
         'flow_temp': round(t2, 1),
         'return_temp': round(t3, 1),
-        'dhw_temp': round(t4, 1),
-        't5': round(t5, 1),
+        'hot_water_temp': round(t4, 1),
+        'heat_exchanger_temp': round(t1, 1),
         'outside_temp': round(t6, 1),
-        'pressure': ch_pressure,
-        'temp_set': round(temp_set, 1),
+        't5': round(t5, 1),
         'fan_speed': fanspeed,
-        'fan_speed_set': fanspeed_set,
+        'fan_speed_setpoint': fanspeed_set,
         'fan_pwm': fan_pwm,
+        'pump_active': pump,
+        'gas_valve': gas_valve,
+        'spark': spark,
         'ionisation_current': ionisation_current,
+        'alarm_status': alarm_status,
+        'fault_code': fault_code,
+        'pressure_sensor': pressure_sensor,
+        'pressure': water_pressure,
+        'low_water_pressure': low_water_pressure,
         'gp_switch': gp_switch,
         'tap_switch': tap_switch,
-        'room_therm': roomtherm,
-        'pump_active': pump,
-        'dhw_active': dwk,
-        'alarm_status': alarm_status,
-        'ch_cascade_relay': ch_cascade_relay,
         'opentherm': opentherm,
-        'flame_on': gasvalve,
-        'spark': spark,
+        'room_thermostat': roomtherm,
+        'three_way_valve': three_way_valve,
+        'ch_cascade_relay': ch_cascade_relay,
         'ionisation_signal': ionisation_signal,
-        'ch_ot_disabled': ch_ot_disabled,
-        'low_water_pressure': low_water_pressure,
-        'pressure_sensor': pressure_sensor,
+        'opentherm_disabled': opentherm_disabled,
         'burner_block': burner_block,
-        'grad_flag': grad_flag,
+        'gradient_flag': gradient_flag,
+        'byte_26_flags': f"{bin(d[26])[2:].zfill(8)}",
         'byte_27_flags': f"{bin(d[27])[2:].zfill(8)}",
-        'byte_28_flags': f"{bin(d[28])[2:].zfill(8)}",
-        'byte_29_flags': f"{bin(d[29])[2:].zfill(8)}"
+        'byte_28_flags': f"{bin(d[28])[2:].zfill(8)}"
     }
 
     return data
 
 def prettify_key(key):
-    """Convert snake_case keys to Title Case with better readability"""
-    replacements = {
-        'dhw_': 'Hot_Water_',
-        'ch_': 'Heating_',
-        '_ot_': '_OpenTherm_',
-        'temp_': 'Temperature_',
-        '_temp': '_Temperature',
-        'gp_': 'GP_',
-        '_pwm': '_PWM'
+    return ' '.join(word.capitalize() for word in key.split('_'))
+
+def prettify_fault_code(code):
+    fault_codes = {
+        0: "F000 - Sensor defect",
+        1: "F001 - Temperature too high during central heating demand",
+        2: "F002 - Temperature too high during domestic hot water (DHW) demand",
+        3: "F003 - Flue gas temperature too high",
+        4: "F004 - No flame during startup",
+        5: "F005 - Flame disappears during operation",
+        6: "F006 - Flame simulation error",
+        7: "F007 - No or insufficient ionisation flow",
+        8: "F008 - Fan speed incorrect",
+        9: "F009 - Burner controller has internal fault",
+        10: "F010 - Sensor fault",
+        11: "F011 - Sensor fault",
+        12: "F012 - Sensor 5 fault",
+        14: "F014 - Mounting fault sensor",
+        15: "F015 - Mounting fault sensor S1",
+        16: "F016 - Mounting fault S3",
+        18: "F018 - Flue and/or air supply duct is blocked",
+        19: "F019 - BMM error",
+        27: "F027 - Short circuit of outdoor",
+        28: "F028 - Reset error",
+        29: "F029 - Gas valve error",
+        30: "F030 - Sensor S3 fault",
+        31: "F031 - Sensor fault S1"
     }
-
-    # First replace known abbreviations
-    pretty = key.lower()
-    for old, new in replacements.items():
-        pretty = pretty.replace(old, new)
-
-    # Convert snake_case to Title Case
-    pretty = ' '.join(word.capitalize() for word in pretty.split('_'))
-
-    return pretty
+    return fault_codes.get(code, f"Unknown fault code: {code}")
 
 def display_readings(data):
     """Display current boiler readings in a readable format"""
     print("\033[2J\033[H")  # Clear screen and move cursor to top
-    for key, value in sorted(data.items()):
+    for key, value in data.items():
         pretty_key = prettify_key(key)
-        if isinstance(value, int):
-            print(f"{pretty_key}: {value:}")
-        elif isinstance(value, float):
+        if isinstance(value, float):
             print(f"{pretty_key}: {value:.1f}")
         elif isinstance(value, bool):
             print(f"{pretty_key}: {'ON' if value else 'OFF'}")
@@ -347,7 +330,7 @@ def get_packet(port, mqtt_user, mqtt_password):
                         data = parse_packet(s)
                         mqtt_handler.publish_data(data)
                         display_readings(data)
-                    time.sleep(1)
+                    time.sleep(2)
         except serial.SerialException as e:
             print(f"Serial connection lost: {e}")
             time.sleep(10)
