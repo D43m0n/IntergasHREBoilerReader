@@ -174,15 +174,15 @@ def parse_packet(s):
     def get_bool(data, bit):
         return bool(data & (1 << bit))
 
-    t1 = getTemp(d[1],d[0])    # heat exchanger temperature
-    t2 = getTemp(d[3],d[2])    # flow temperature
-    t3 = getTemp(d[5],d[4])    # return temperature
-    t4 = getTemp(d[7],d[6])    # hot water temperature
-    t5 = getTemp(d[9],d[8])    # boiler temperature (?)
-    t6 = getTemp(d[11],d[10])  # outside temp (?)
+    heat_exchanger_temp = getTemp(d[1],d[0])    # not 100% sure
+    flow_temp = getTemp(d[3],d[2])
+    return_temp = getTemp(d[5],d[4])
+    hot_water_temp = getTemp(d[7],d[6])
+    t5 = getTemp(d[9],d[8])                     # boiler temp (?)
+    outside_temp = getTemp(d[11],d[10])
     water_pressure = getFloat(d[13],d[12])
     temp_setpoint = getFloat(d[15],d[14])
-    fanspeed_set = getInt(d[17],d[16])
+    fan_speed_setpoint = getInt(d[17],d[16])
     fanspeed = getInt(d[19],d[18])
     fan_pwm = getFloat(d[21],d[20])
     ionisation_current = getFloat(d[23],d[22])
@@ -221,6 +221,10 @@ def parse_packet(s):
     else:
         fault_code = "None"
 
+    # Outside temp sensor may not be available
+    if outside_temp < -50:
+        outside_temp = "N/A"
+
     # Add status code interpretation
     status_codes = {
         51: "Recirculating tap water",
@@ -236,16 +240,16 @@ def parse_packet(s):
     data = {
         'status': status,
         'temp_setpoint': round(temp_setpoint, 1),
-        'flow_temp': round(t2, 1),
-        'return_temp': round(t3, 1),
-        'hot_water_temp': round(t4, 1),
-        'heat_exchanger_temp': round(t1, 1),
-        'outside_temp': round(t6, 1),
+        'flow_temp': round(flow_temp, 1),
+        'return_temp': round(return_temp, 1),
+        'hot_water_temp': round(hot_water_temp, 1),
+        'heat_exchanger_temp': round(heat_exchanger_temp, 1),
+        'outside_temp': outside_temp,
         't5': round(t5, 1),
         'fan_speed': fanspeed,
-        'fan_speed_setpoint': fanspeed_set,
+        'fan_speed_setpoint': fan_speed_setpoint,
         'fan_pwm': fan_pwm,
-        'pump_active': pump,
+        'pump': pump,
         'gas_valve': gas_valve,
         'spark': spark,
         'ionisation_current': ionisation_current,
