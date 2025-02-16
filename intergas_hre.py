@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 import argparse
-import csv
-import ctypes
 import serial
 import sys
 import time
@@ -52,6 +50,14 @@ SENSORS = {
         "device_class": "speed",
         "unit_of_measurement": "rpm",
         "state_class": "measurement"
+    },
+    "pumpspeed": {
+        "name": "Pump Speed",
+        "device_class": "power_factor",
+        "unit_of_measurement": "%",
+        "state_class": "measurement",
+        "accuracy_decimals": 0,
+        "icon": "mdi:pump"
     },
     "status": {
         "name": "Status",
@@ -205,12 +211,15 @@ def getInt24(b1, b2, b3):
 def get_bool(data, bit):
     return bool(data & (1 << bit))
 
-def parse_status_response(s):
-    # Convert bytes to list of integers if needed
+# Convert bytes to list of integers if needed
+def convert(s):
     if isinstance(s, bytes):
-        d = list(s)
+        return list(s)
     else:
-        d = list(map(ord, unpack('=cccccccccccccccccccccccccccccccc', s)))
+        return list(map(ord, unpack('=cccccccccccccccccccccccccccccccc', s)))
+
+def parse_status_response(s):
+    d = convert(s)
 
     heat_exchanger_temp = getTemp(d[1],d[0])    # not 100% sure
     flow_temp = getTemp(d[3],d[2])
@@ -313,12 +322,19 @@ def parse_status_response(s):
 
     return data
 
+def parse_status_extra_response(s):
+    d = convert(s)
+
+    tapflow = getFloat(d[1], d[0])
+    pumpspeed = (200 - int(d[2])) / 2   # percentage speed 0-100
+
+    return {
+        'tapflow': tapflow,
+        'pumpspeed': pumpspeed
+    }
+
 def parse_stats_response(s):
-    # Convert bytes to list of integers if needed
-    if isinstance(s, bytes):
-        d = list(s)
-    else:
-        d = list(map(ord, unpack('=cccccccccccccccccccccccccccccccc', s)))
+    d = convert(s)
 
     line_power_connected_hours = getInt24(s[30], s[1], s[0])
     line_power_connected_count = getInt(s[3], s[2])
@@ -382,8 +398,7 @@ def prettify_fault_code(code):
     return fault_codes.get(code, f"Unknown fault code: {code}")
 
 def display_readings(data):
-    """Display current boiler readings in a readable format"""
-    print("\033[2J\033[H")  # Clear screen and move cursor to top
+    # print("\033[2J\033[H")  # Clear screen and move cursor to top
     for key, value in data.items():
         pretty_key = prettify_key(key)
         if isinstance(value, float):
@@ -406,24 +421,31 @@ def get_packet(port, mqtt_user, mqtt_password):
                 while True:
                     # Retrieve status
                     ser.write(b'S?\r')
-                    status_data = ser.read(32)
-                    if len(status_data) == 32:
-                        parsed_status_data = parse_status_response(status_data)
+                    data = ser.read(32)
+                    if len(data) == 32:
+                        parsed_status_data = parse_status_response(data)
                         mqtt_handler.publish_data(parsed_status_data)
-                        display_readings(parsed_status_data)
-                    time.sleep(2)
+
+                    # Retrieve status extra
+                    ser.write(b'S2\r')
+                    data = ser.read(32)
+                    if len(data) == 32:
+                        parsed_status_extra_data = parse_status_extra_response(data)
+                        mqtt_handler.publish_data(parsed_status_extra_data)
 
                     # Retrieve runtime stats every 60 seconds
                     current_time = time.time()
                     if current_time - last_stats_time >= 60:
                         last_stats_time = current_time
                         ser.write(b'HN\r')
-                        stats_data = ser.read(32)
-                        if len(stats_data) == 32:
-                            parsed_stats_data = parse_stats_response(stats_data)
+                        data = ser.read(32)
+                        if len(data) == 32:
+                            parsed_stats_data = parse_stats_response(data)
                             mqtt_handler.publish_data(parsed_stats_data)
-                            display_readings(parsed_stats_data)
-                        time.sleep(2)
+
+                    display_readings(parsed_status_data | parsed_status_extra_data | parsed_stats_data)
+                    time.sleep(2)
+
         except serial.SerialException as e:
             print(f"Serial connection lost: {e}")
             time.sleep(10)
