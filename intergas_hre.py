@@ -58,6 +58,22 @@ SENSORS = {
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None
+    },
+    "gas_meter_heating": {
+        "name": "Gas meter (heating)",
+        "device_class": "gas",
+        "unit_of_measurement": "m³",
+        "state_class": "total_increasing",
+        "icon": "mdi:meter-gas",
+        "accuracy_decimals": 3
+    },
+    "gas_meter_hot_water": {
+        "name": "Gas meter (hot water)",
+        "device_class": "gas",
+        "unit_of_measurement": "m³",
+        "state_class": "total_increasing",
+        "icon": "mdi:meter-gas",
+        "accuracy_decimals": 3
     }
 }
 
@@ -140,39 +156,61 @@ class MQTTHandler:
                 self.client.publish(topic, current_state)
                 self.cached_values[key] = current_state
 
-def parse_packet(s):
+## Data parsing
+
+def convert_to_signed_word(msb, lsb):
+    """Convert MSB/LSB bytes to signed 16-bit integer"""
+    word = (msb << 8 | lsb)
+    # Convert to signed 16-bit
+    if word > 32767:
+        word -= 65536
+    return word
+
+def getFloat(msb, lsb):
+    word = convert_to_signed_word(msb, lsb)
+    return float(word) / 100.0
+
+def getFloat24(b1, b2, b3):
+    value = (b1 << 16) | (b2 << 8) | b3
+    if value & 0x800000:
+        value -= 0x1000000
+    return float(value) / 100.0
+
+def getFloat32(b1, b2, b3, b4):
+    value = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4
+    if value & 0x80000000:
+        value -= 0x100000000
+    return float(value) / 100.0
+
+
+def getTemp(msb, lsb):
+    word = convert_to_signed_word(msb, lsb)
+    if word <= -5100 or word == 32767:  # 32767 is SHRT_MAX
+        # Intergas gives -5100 for disconnected sensors
+        return float('nan')
+
+    return float(word) / 100.0
+
+def getInt(msb, lsb):
+    word = convert_to_signed_word(msb, lsb)
+    return int(word)
+
+def getInt24(b1, b2, b3):
+    value = (b1 << 16) | (b2 << 8) | b3
+    # Handle sign bit (if b1's MSB is 1)
+    if value & 0x800000:
+        value -= 0x1000000
+    return value
+
+def get_bool(data, bit):
+    return bool(data & (1 << bit))
+
+def parse_status_response(s):
     # Convert bytes to list of integers if needed
     if isinstance(s, bytes):
         d = list(s)
     else:
         d = list(map(ord, unpack('=cccccccccccccccccccccccccccccccc', s)))
-
-    def convert_to_signed_word(msb, lsb):
-        """Convert MSB/LSB bytes to signed 16-bit integer"""
-        word = (msb << 8 | lsb)
-        # Convert to signed 16-bit
-        if word > 32767:
-            word -= 65536
-        return word
-
-    def getFloat(msb, lsb):
-        word = convert_to_signed_word(msb, lsb)
-        return float(word) / 100.0
-
-    def getTemp(msb, lsb):
-        word = convert_to_signed_word(msb, lsb)
-        if word <= -5100 or word == 32767:  # 32767 is SHRT_MAX
-            # Intergas gives -5100 for disconnected sensors
-            return float('nan')
-
-        return float(word) / 100.0
-
-    def getInt(msb, lsb):
-        word = convert_to_signed_word(msb, lsb)
-        return int(word)
-
-    def get_bool(data, bit):
-        return bool(data & (1 << bit))
 
     heat_exchanger_temp = getTemp(d[1],d[0])    # not 100% sure
     flow_temp = getTemp(d[3],d[2])
@@ -227,8 +265,8 @@ def parse_packet(s):
 
     # Add status code interpretation
     status_codes = {
-        51: "Recirculating tap water",
-        0: "Central Heating active (1)",
+        51: "Hot water ramp down",
+        0: "Central Heating active",
         102: "Central Heating active (2)",
         126: "Idle",
         170: "Service mode",
@@ -271,6 +309,43 @@ def parse_packet(s):
         'byte_26_flags': f"{bin(d[26])[2:].zfill(8)}",
         'byte_27_flags': f"{bin(d[27])[2:].zfill(8)}",
         'byte_28_flags': f"{bin(d[28])[2:].zfill(8)}"
+    }
+
+    return data
+
+def parse_stats_response(s):
+    # Convert bytes to list of integers if needed
+    if isinstance(s, bytes):
+        d = list(s)
+    else:
+        d = list(map(ord, unpack('=cccccccccccccccccccccccccccccccc', s)))
+
+    line_power_connected_hours = getInt24(s[30], s[1], s[0])
+    line_power_connected_count = getInt(s[3], s[2])
+    heating_hours = getInt(s[5], s[4])
+    hot_water_hours = getInt(s[7], s[6])
+    burner_start_count_heating = getInt24(s[31], s[9], s[8])
+    ignition_failed = getInt(s[11], s[10])
+    flame_lost = getInt(s[13], s[12])
+    reset_count = getInt(s[15], s[14])
+    gas_meter_heating = getFloat32(s[19], s[18], s[17], s[16]) / 100    # m3
+    gas_meter_hot_water = getFloat32(s[23], s[22], s[21], s[20]) / 100  # m3
+    water_meter = getFloat24(s[28], s[25], s[24])
+    burner_start_count_hot_water = getInt24(s[29], s[27], s[26])
+
+    data = {
+        'line_power_connected_hours': line_power_connected_hours,
+        'line_power_connected_count': line_power_connected_count,
+        'heating_hours': heating_hours,
+        'hot_water_hours': hot_water_hours,
+        'burner_start_count_heating': burner_start_count_heating,
+        'burner_start_count_hot_water': burner_start_count_hot_water,
+        'gas_meter_heating': round(gas_meter_heating, 3),
+        'gas_meter_hot_water': round(gas_meter_hot_water, 3),
+        'water_meter': water_meter,
+        'ignition_failed': ignition_failed,
+        'flame_lost': flame_lost,
+        'reset_count': reset_count
     }
 
     return data
@@ -322,19 +397,33 @@ def display_readings(data):
 def get_packet(port, mqtt_user, mqtt_password):
     mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
     mqtt_handler.connect()
+    last_stats_time = 0
 
-    while True:  # outer reconnection loop
+    while True:  # outer serial reconnection loop
         try:
             with serial.Serial(port, 9600, timeout=2) as ser:
                 print(f"Connected to {port}")
                 while True:
+                    # Retrieve status
                     ser.write(b'S?\r')
-                    s = ser.read(32)
-                    if len(s) == 32:
-                        data = parse_packet(s)
-                        mqtt_handler.publish_data(data)
-                        display_readings(data)
+                    status_data = ser.read(32)
+                    if len(status_data) == 32:
+                        parsed_status_data = parse_status_response(status_data)
+                        mqtt_handler.publish_data(parsed_status_data)
+                        display_readings(parsed_status_data)
                     time.sleep(2)
+
+                    # Retrieve runtime stats every 60 seconds
+                    current_time = time.time()
+                    if current_time - last_stats_time >= 60:
+                        last_stats_time = current_time
+                        ser.write(b'HN\r')
+                        stats_data = ser.read(32)
+                        if len(stats_data) == 32:
+                            parsed_stats_data = parse_stats_response(stats_data)
+                            mqtt_handler.publish_data(parsed_stats_data)
+                            display_readings(parsed_stats_data)
+                        time.sleep(2)
         except serial.SerialException as e:
             print(f"Serial connection lost: {e}")
             time.sleep(10)
@@ -343,6 +432,10 @@ def get_packet(port, mqtt_user, mqtt_password):
             print(f"Unexpected error: {e}")
             time.sleep(10)
             continue
+
+def parse_hn_packet(data):
+    # Implementation to be added
+    pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Intergas boiler reader')
