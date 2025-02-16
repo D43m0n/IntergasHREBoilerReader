@@ -203,7 +203,6 @@ def getTemp(msb, lsb):
     if word <= -5100 or word == 32767:  # 32767 is SHRT_MAX
         # Intergas gives -5100 for disconnected sensors
         return float('nan')
-
     return float(word) / 100.0
 
 def getInt(msb, lsb):
@@ -220,60 +219,51 @@ def getInt24(b1, b2, b3):
 def get_bool(data, bit):
     return bool(data & (1 << bit))
 
-# Convert bytes to list of integers if needed
-def convert(s):
-    if isinstance(s, bytes):
-        return list(s)
-    else:
-        return list(map(ord, unpack('=cccccccccccccccccccccccccccccccc', s)))
-
 def parse_status_response(s):
-    d = convert(s)
-
-    heat_exchanger_temp = getTemp(d[1],d[0])    # not 100% sure
-    flow_temp = getTemp(d[3],d[2])
-    return_temp = getTemp(d[5],d[4])
-    hot_water_temp = getTemp(d[7],d[6])
-    t5 = getTemp(d[9],d[8])                     # boiler temp (?)
-    outside_temp = getTemp(d[11],d[10])
-    water_pressure = getFloat(d[13],d[12])
-    temp_setpoint = getFloat(d[15],d[14])
-    fan_speed_setpoint = getInt(d[17],d[16])
-    fanspeed = getInt(d[19],d[18])
-    fan_pwm = getFloat(d[21],d[20])
-    ionisation_current = getFloat(d[23],d[22])
-    displ_code = d[24]
+    heat_exchanger_temp = getTemp(s[1],s[0])    # not 100% sure
+    flow_temp = getTemp(s[3], s[2])
+    return_temp = getTemp(s[5], s[4])
+    hot_water_temp = getTemp(s[7], s[6])
+    t5 = getTemp(s[9], s[8])                     # boiler temp (?)
+    outside_temp = getTemp(s[11], s[10])
+    water_pressure = getFloat(s[13], s[12])
+    temp_setpoint = getFloat(s[15], s[14])
+    fan_speed_setpoint = getInt(s[17], s[16])
+    fanspeed = getInt(s[19], s[18])
+    fan_pwm = getFloat(s[21], s[20])
+    ionisation_current = getFloat(s[23], s[22])
+    displ_code = s[24]
 
     # TO-DO: What's on byte 25?
 
     # bit flags from byte 26
-    gp_switch = get_bool(d[26], 0)
-    tap_switch = get_bool(d[26], 1)
-    roomtherm = get_bool(d[26], 2)
-    pump = get_bool(d[26], 3)
-    three_way_valve = get_bool(d[26], 4)
-    alarm_status = get_bool(d[26], 5)
-    ch_cascade_relay = get_bool(d[26], 6)
-    opentherm = get_bool(d[26], 7)
+    gp_switch = get_bool(s[26], 0)
+    tap_switch = get_bool(s[26], 1)
+    roomtherm = get_bool(s[26], 2)
+    pump = get_bool(s[26], 3)
+    three_way_valve = get_bool(s[26], 4)
+    alarm_status = get_bool(s[26], 5)
+    ch_cascade_relay = get_bool(s[26], 6)
+    opentherm = get_bool(s[26], 7)
 
     # TO-DO: What are the flags for byte 27 beyond fault code?
 
     # bit flags from byte 28
-    gas_valve = get_bool(d[28], 0)
-    spark = get_bool(d[28], 1)
-    ionisation_signal = get_bool(d[28], 2)
-    opentherm_disabled = get_bool(d[28], 3)
-    low_water_pressure = get_bool(d[28], 4)
-    pressure_sensor = get_bool(d[28], 5)
-    burner_block = get_bool(d[28], 6)
-    gradient_flag = get_bool(d[28], 7)
+    gas_valve = get_bool(s[28], 0)
+    spark = get_bool(s[28], 1)
+    ionisation_signal = get_bool(s[28], 2)
+    opentherm_disabled = get_bool(s[28], 3)
+    low_water_pressure = get_bool(s[28], 4)
+    pressure_sensor = get_bool(s[28], 5)
+    burner_block = get_bool(s[28], 6)
+    gradient_flag = get_bool(s[28], 7)
 
     if not pressure_sensor:
         water_pressure = float('nan')
 
-    if get_bool(d[27], 7):
+    if get_bool(s[27], 7):
         # last known fault code
-        fault_code = prettify_fault_code(d[29])
+        fault_code = prettify_fault_code(s[29])
     else:
         fault_code = "None"
 
@@ -324,27 +314,23 @@ def parse_status_response(s):
         'opentherm_disabled': opentherm_disabled,
         'burner_block': burner_block,
         'gradient_flag': gradient_flag,
-        'byte_26_flags': f"{bin(d[26])[2:].zfill(8)}",
-        'byte_27_flags': f"{bin(d[27])[2:].zfill(8)}",
-        'byte_28_flags': f"{bin(d[28])[2:].zfill(8)}"
+        'byte_26_flags': f"{bin(s[26])[2:].zfill(8)}",
+        'byte_27_flags': f"{bin(s[27])[2:].zfill(8)}",
+        'byte_28_flags': f"{bin(s[28])[2:].zfill(8)}"
     }
 
     return data
 
 def parse_status_extra_response(s):
-    d = convert(s)
-
-    tapflow = getFloat(d[1], d[0])
-    pumpspeed = (200 - int(d[2])) / 2   # percentage speed 0-100
+    tapflow = getFloat(s[1], s[0])
+    pumpspeed = (200 - int(s[2])) / 2   # percentage speed 0-100
 
     return {
         'tapflow': tapflow,
-        'pumpspeed': pumpspeed
+        'pumpspeed': int(pumpspeed)
     }
 
 def parse_stats_response(s):
-    d = convert(s)
-
     line_power_connected_hours = getInt24(s[30], s[1], s[0])
     line_power_connected_count = getInt(s[3], s[2])
     heating_hours = getInt(s[5], s[4])
@@ -453,7 +439,7 @@ def get_packet(port, mqtt_user, mqtt_password):
                     aggregated_data = parsed_status_data | parsed_status_extra_data | parsed_stats_data
                     display_readings(aggregated_data)
                     mqtt_handler.publish_data(aggregated_data)
-                    
+
                     time.sleep(2)
 
         except serial.SerialException as e:
