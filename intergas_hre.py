@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 import argparse
 import serial
+import logging
 import sys
 import time
 import json
 import paho.mqtt.client as mqtt
 from struct import *
+from logging.handlers import RotatingFileHandler
 
 # MQTT Settings
 MQTT_BROKER = "homeassistant.local"
@@ -19,6 +21,10 @@ DEVICE_MODEL = "Kombi Kompakt HRE 36/30"
 DEVICE_MANUFACTURER = "Intergas"
 
 MQTT_BASE_TOPIC = f"boiler/{DEVICE_ID}"
+
+LOG_FILE = "log.txt"
+LOG_FILE_MQTT = "log_mqtt.txt"
+LOG_FILE_DATA = "log_data.txt"
 
 SENSORS = {
     "flow_temp": {
@@ -85,7 +91,7 @@ SENSORS = {
 
 class MQTTHandler:
     def __init__(self, mqtt_user, mqtt_password):
-        print("Initializing MQTT client...")
+        logger.info("Initializing MQTT client...")
         self.client = mqtt.Client(
             client_id=MQTT_CLIENT_ID,
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2
@@ -105,18 +111,18 @@ class MQTTHandler:
             self.client.connect(MQTT_BROKER, MQTT_PORT)
             self.client.loop_start()
         except Exception as e:
-            print(f"MQTT Connection failed: {str(e)}")
+            logger.error(f"MQTT Connection failed: {str(e)}")
             sys.exit(1)
 
     def on_connect(self, client, userdata, flags, rc, something):
-        print(f"Connected to MQTT broker with result code {rc}")
+        logger.info(f"Connected to MQTT broker with result code {rc}")
         if not self.setup_done:
             self.setup_discovery()
             self.setup_done = True
 
     def on_disconnect(self, client, userdata, rc):
         self.reconnect_count += 1
-        print(f"Disconnected from MQTT broker (attempt {self.reconnect_count})")
+        logger.info(f"Disconnected from MQTT broker (attempt {self.reconnect_count})")
         time.sleep(min(self.reconnect_count * 5, 30))  # Exponential backoff
         self.client.connect(MQTT_BROKER, MQTT_PORT)
 
@@ -151,6 +157,8 @@ class MQTTHandler:
         """Publish boiler data to MQTT topics only when values change"""
         for key in SENSORS.keys():
             if key not in data:
+                logger.error(f"Missing data for sensor '{key}'")
+                logger.info(data)
                 continue
 
             value = data[key]
@@ -161,6 +169,7 @@ class MQTTHandler:
             if key not in self.cached_values or current_state != self.cached_values[key]:
                 self.client.publish(topic, current_state)
                 self.cached_values[key] = current_state
+                mqtt_logger.debug(f"{topic}: {current_state}")
 
 ## Data parsing
 
@@ -398,7 +407,7 @@ def prettify_fault_code(code):
     return fault_codes.get(code, f"Unknown fault code: {code}")
 
 def display_readings(data):
-    # print("\033[2J\033[H")  # Clear screen and move cursor to top
+    print("\033[2J\033[H")  # Clear screen and move cursor to top
     for key, value in data.items():
         pretty_key = prettify_key(key)
         if isinstance(value, float):
@@ -408,6 +417,7 @@ def display_readings(data):
         else:
             print(f"{pretty_key}: {value}")
     print("\nPress Ctrl+C to stop...")
+    data_logger.debug(data)
 
 def get_packet(port, mqtt_user, mqtt_password):
     mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
@@ -417,21 +427,19 @@ def get_packet(port, mqtt_user, mqtt_password):
     while True:  # outer serial reconnection loop
         try:
             with serial.Serial(port, 9600, timeout=2) as ser:
-                print(f"Connected to {port}")
+                logger.info(f"Connected to {port}")
                 while True:
                     # Retrieve status
                     ser.write(b'S?\r')
                     data = ser.read(32)
                     if len(data) == 32:
                         parsed_status_data = parse_status_response(data)
-                        mqtt_handler.publish_data(parsed_status_data)
 
                     # Retrieve status extra
                     ser.write(b'S2\r')
                     data = ser.read(32)
                     if len(data) == 32:
                         parsed_status_extra_data = parse_status_extra_response(data)
-                        mqtt_handler.publish_data(parsed_status_extra_data)
 
                     # Retrieve runtime stats every 60 seconds
                     current_time = time.time()
@@ -441,23 +449,72 @@ def get_packet(port, mqtt_user, mqtt_password):
                         data = ser.read(32)
                         if len(data) == 32:
                             parsed_stats_data = parse_stats_response(data)
-                            mqtt_handler.publish_data(parsed_stats_data)
 
-                    display_readings(parsed_status_data | parsed_status_extra_data | parsed_stats_data)
+                    aggregated_data = parsed_status_data | parsed_status_extra_data | parsed_stats_data
+                    display_readings(aggregated_data)
+                    mqtt_handler.publish_data(aggregated_data)
+                    
                     time.sleep(2)
 
         except serial.SerialException as e:
-            print(f"Serial connection lost: {e}")
+            logger.error(f"Serial connection lost: {e}")
             time.sleep(10)
             continue
         except Exception as e:
-            print(f"Unexpected error: {e}")
+            logger.error(f"Unexpected error: {e}")
             time.sleep(10)
             continue
 
-def parse_hn_packet(data):
-    # Implementation to be added
-    pass
+def make_logger():
+    logger = logging.getLogger("logger")
+    logger.setLevel(logging.DEBUG)
+
+    log_file = logging.FileHandler(LOG_FILE)
+    log_file.setLevel(logging.INFO)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+
+    mqtt_log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=0)
+    mqtt_log_file.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    log_file.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    mqtt_log_file.setFormatter(formatter)
+
+    logger.addHandler(log_file)
+    logger.addHandler(console_handler)
+
+    return logger
+
+def make_mqtt_logger():
+    logger = logging.getLogger("mqtt_logger")
+    logger.setLevel(logging.DEBUG)
+
+    log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=0)
+    log_file.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    log_file.setFormatter(formatter)
+
+    logger.addHandler(log_file)
+
+    return logger
+
+def make_data_logger():
+    logger = logging.getLogger("data_logger")
+    logger.setLevel(logging.DEBUG)
+
+    log_file = RotatingFileHandler(LOG_FILE_DATA, maxBytes=10000000, backupCount=0)
+    log_file.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    log_file.setFormatter(formatter)
+
+    logger.addHandler(log_file)
+
+    return logger
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Intergas boiler reader')
@@ -465,5 +522,9 @@ if __name__ == '__main__':
     parser.add_argument('--mqtt-password', required=True, help='MQTT password')
     parser.add_argument('--port', required=True, help='Serial port')
     args = parser.parse_args()
+
+    logger = make_logger()
+    mqtt_logger = make_mqtt_logger()
+    data_logger = make_data_logger()
 
     get_packet(args.port, args.mqtt_user, args.mqtt_password)
