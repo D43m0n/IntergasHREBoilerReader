@@ -57,7 +57,7 @@ SENSORS = {
         "unit_of_measurement": "rpm",
         "state_class": "measurement"
     },
-    "pumpspeed": {
+    "pump_speed": {
         "name": "Pump Speed",
         "device_class": "power_factor",
         "unit_of_measurement": "%",
@@ -97,12 +97,11 @@ class MQTTHandler:
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2
         )
         self.client.username_pw_set(mqtt_user, mqtt_password)
-
-        # Set callbacks
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
-        self.setup_done = False
         self.client.will_set(f"{MQTT_BASE_TOPIC}/status", "offline", retain=True)
+
+        self.setup_done = False
         self.reconnect_count = 0
         self.cached_values = {}  # Cache last published values to avoid sending out unnecessary messages to mqtt
 
@@ -114,11 +113,18 @@ class MQTTHandler:
             logger.error(f"MQTT Connection failed: {str(e)}")
             sys.exit(1)
 
-    def on_connect(self, client, userdata, flags, rc, something):
-        logger.info(f"Connected to MQTT broker with result code {rc}")
-        if not self.setup_done:
-            self.setup_discovery()
-            self.setup_done = True
+    def on_connect(self, client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            logger.info("Connected to MQTT broker successfully")
+
+            if not self.setup_done:
+                self.setup_discovery()
+                self.setup_done = True
+
+            # Publish online status
+            self.client.publish(f"{MQTT_BASE_TOPIC}/status", "online", retain=True, qos=1)
+        else:
+            logger.error(f"Connection to MQTT broker failed with result code {rc}")
 
     def on_disconnect(self, client, userdata, rc):
         self.reconnect_count += 1
@@ -144,6 +150,7 @@ class MQTTHandler:
                 "state_class": config['state_class'],
                 "unit_of_measurement": config['unit_of_measurement'],
                 "state_topic": f"{MQTT_BASE_TOPIC}/{sensor_id}/state",
+                "availability_topic": f"{MQTT_BASE_TOPIC}/status",
                 "device": device_info
             }
 
@@ -155,21 +162,35 @@ class MQTTHandler:
 
     def publish_data(self, data):
         """Publish boiler data to MQTT topics only when values change"""
+        data_logger.debug(data)
+
         for key in SENSORS.keys():
             if key not in data:
                 logger.error(f"Missing data for sensor '{key}'")
-                logger.info(data)
                 continue
 
             value = data[key]
-            # print(f"Debug - Publishing {key}: {value}")
             topic = f"{MQTT_BASE_TOPIC}/{key}/state"
 
             current_state = str(value)
             if key not in self.cached_values or current_state != self.cached_values[key]:
-                self.client.publish(topic, current_state)
-                self.cached_values[key] = current_state
-                mqtt_logger.debug(f"{topic}: {current_state}")
+                try:
+                    result = self.client.publish(
+                        topic,
+                        current_state,
+                        qos=1,
+                        retain=True
+                    )
+
+                    if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                        self.cached_values[key] = current_state
+                        mqtt_logger.debug(f"{topic}: {current_state}")
+                    else:
+                        logger.error(f"Failed to publish to {topic}: {result.rc}")
+                except Exception as e:
+                    logger.error(f"Error publishing to {topic}: {str(e)}")
+                    self.client.disconnect()
+                    self.client.reconnect()
 
 ## Data parsing
 
@@ -229,8 +250,8 @@ def parse_status_response(s):
     water_pressure = getFloat(s[13], s[12])
     temp_setpoint = getFloat(s[15], s[14])
     fan_speed_setpoint = getInt(s[17], s[16])
-    fanspeed = getInt(s[19], s[18])
-    fan_pwm = getFloat(s[21], s[20])
+    fan_speed = getInt(s[19], s[18])
+    fan_pwm = getFloat(s[21], s[20])            # watts?
     ionisation_current = getFloat(s[23], s[22])
     displ_code = s[24]
 
@@ -275,11 +296,11 @@ def parse_status_response(s):
     status_codes = {
         51: "Hot water ramp down",
         0: "Central Heating active",
-        102: "Central Heating active (2)",
+        102: "Central Heating health-check",    # anti-blockade run once every 24 hours
         126: "Idle",
         170: "Service mode",
         204: "Hot water active",
-        231: "Central Heating ramp down",
+        231: "Central Heating ramp down",       # water recirculation after each heating period
     }
     status = status_codes.get(displ_code, f"Unknown ({displ_code})")
 
@@ -292,7 +313,7 @@ def parse_status_response(s):
         'heat_exchanger_temp': round(heat_exchanger_temp, 1),
         'outside_temp': outside_temp,
         't5': round(t5, 1),
-        'fan_speed': fanspeed,
+        'fan_speed': fan_speed,
         'fan_speed_setpoint': fan_speed_setpoint,
         'fan_pwm': fan_pwm,
         'pump': pump,
@@ -322,12 +343,12 @@ def parse_status_response(s):
     return data
 
 def parse_status_extra_response(s):
-    tapflow = getFloat(s[1], s[0])
-    pumpspeed = (200 - int(s[2])) / 2   # percentage speed 0-100
+    tap_flow = getFloat(s[1], s[0])
+    pump_speed = (200 - int(s[2])) / 2   # percentage speed 0-100
 
     return {
-        'tapflow': tapflow,
-        'pumpspeed': int(pumpspeed)
+        'tap_flow': tap_flow,
+        'pump_speed': int(pump_speed)
     }
 
 def parse_stats_response(s):
@@ -403,7 +424,6 @@ def display_readings(data):
         else:
             print(f"{pretty_key}: {value}")
     print("\nPress Ctrl+C to stop...")
-    data_logger.debug(data)
 
 def get_packet(port, mqtt_user, mqtt_password):
     mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
@@ -451,53 +471,46 @@ def get_packet(port, mqtt_user, mqtt_password):
             time.sleep(10)
             continue
 
-def make_logger():
-    logger = logging.getLogger("logger")
-    logger.setLevel(logging.DEBUG)
-
+def make_general_logger():
     log_file = logging.FileHandler(LOG_FILE)
     log_file.setLevel(logging.INFO)
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.DEBUG)
 
-    mqtt_log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=0)
-    mqtt_log_file.setLevel(logging.DEBUG)
-
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     log_file.setFormatter(formatter)
     console_handler.setFormatter(formatter)
-    mqtt_log_file.setFormatter(formatter)
 
+    logger = logging.getLogger("logger")
+    logger.setLevel(logging.DEBUG)
     logger.addHandler(log_file)
     logger.addHandler(console_handler)
 
     return logger
 
 def make_mqtt_logger():
-    logger = logging.getLogger("mqtt_logger")
-    logger.setLevel(logging.DEBUG)
-
-    log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=0)
+    log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=1)
     log_file.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     log_file.setFormatter(formatter)
 
+    logger = logging.getLogger("mqtt_logger")
+    logger.setLevel(logging.DEBUG)
     logger.addHandler(log_file)
 
     return logger
 
 def make_data_logger():
-    logger = logging.getLogger("data_logger")
-    logger.setLevel(logging.DEBUG)
-
-    log_file = RotatingFileHandler(LOG_FILE_DATA, maxBytes=10000000, backupCount=0)
+    log_file = RotatingFileHandler(LOG_FILE_DATA, maxBytes=10000000, backupCount=1)
     log_file.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     log_file.setFormatter(formatter)
 
+    logger = logging.getLogger("data_logger")
+    logger.setLevel(logging.DEBUG)
     logger.addHandler(log_file)
 
     return logger
@@ -509,7 +522,7 @@ if __name__ == '__main__':
     parser.add_argument('--port', required=True, help='Serial port')
     args = parser.parse_args()
 
-    logger = make_logger()
+    logger = make_general_logger()
     mqtt_logger = make_mqtt_logger()
     data_logger = make_data_logger()
 
