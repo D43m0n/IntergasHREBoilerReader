@@ -94,15 +94,16 @@ class MQTTHandler:
         logger.info("Initializing MQTT client...")
         self.client = mqtt.Client(
             client_id=MQTT_CLIENT_ID,
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            reconnect_on_failure=True
         )
         self.client.username_pw_set(mqtt_user, mqtt_password)
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
         self.client.will_set(f"{MQTT_BASE_TOPIC}/status", "offline", retain=True)
+        self.client.reconnect_delay_set(min_delay=1, max_delay=300)
 
         self.setup_done = False
-        self.reconnect_count = 0
         self.cached_sensor_values = {}  # Cache last published values to avoid sending out unnecessary messages to mqtt
 
     def connect(self):
@@ -127,13 +128,10 @@ class MQTTHandler:
             logger.error(f"Connection to MQTT broker failed with result code {rc}")
 
     def on_disconnect(self, client, userdata, rc):
-        self.reconnect_count += 1
-        logger.info(f"Disconnected from MQTT broker (attempt {self.reconnect_count})")
-        time.sleep(min(self.reconnect_count * 5, 30))  # Exponential backoff
-        self.client.connect(MQTT_BROKER, MQTT_PORT)
+        logger.info(f"Disconnected from MQTT broker")
 
     def setup_discovery(self):
-        """Setup Home Assistant MQTT discovery"""
+        """Setup device and sensors discovery"""
         device_info = {
             "identifiers": [DEVICE_ID],
             "name": DEVICE_NAME,
@@ -181,17 +179,16 @@ class MQTTHandler:
                         mqtt_logger.debug(f"{topic}: {current_state}")
                     else:
                         logger.error(f"Failed to publish to {topic}: {result.rc}")
+                        if result.rc == mqtt.MQTT_ERR_NO_CONN:
+                            self.client.reconnect()
                 except Exception as e:
-                    logger.error(f"Error publishing to {topic}: {str(e)}")
-                    self.client.disconnect()
-                    self.client.reconnect()
+                    logger.error(f"Error publishing to {topic}: {str(e)}")  # bad payload, etc
 
 ## Data parsing
 
 def convert_to_signed_word(msb, lsb):
     """Convert MSB/LSB bytes to signed 16-bit integer"""
     word = (msb << 8 | lsb)
-    # Convert to signed 16-bit
     if word > 32767:
         word -= 65536
     return word
@@ -235,7 +232,7 @@ def get_bool(data, bit):
     return bool(data & (1 << bit))
 
 def parse_status_response(s):
-    heat_exchanger_temp = getTemp(s[1],s[0])    # not 100% sure
+    heat_exchanger_temp = getTemp(s[1],s[0])    # not 100% sure it's heat exchanger, could be flue gas temp
     flow_temp = getTemp(s[3], s[2])
     return_temp = getTemp(s[5], s[4])
     hot_water_temp = getTemp(s[7], s[6])
@@ -298,7 +295,7 @@ def parse_status_response(s):
     }
     status = status_codes.get(displ_code, f"Unknown ({displ_code})")
 
-    data = {
+    return {
         'status': status,
         'temp_setpoint': round(temp_setpoint, 1),
         'flow_temp': round(flow_temp, 1),
@@ -334,15 +331,13 @@ def parse_status_response(s):
         'byte_28_flags': f"{bin(s[28])[2:].zfill(8)}"
     }
 
-    return data
-
 def parse_status_extra_response(s):
     tap_flow = getFloat(s[1], s[0])
-    pump_speed = (200 - int(s[2])) / 2   # percentage speed 0-100
+    pump_speed = int((200 - int(s[2])) / 2)   # percentage speed 0-100
 
     return {
         'tap_flow': tap_flow,
-        'pump_speed': int(pump_speed)
+        'pump_speed': pump_speed
     }
 
 def parse_stats_response(s):
@@ -359,7 +354,7 @@ def parse_stats_response(s):
     water_meter = getFloat24(s[28], s[25], s[24])
     burner_start_count_hot_water = getInt24(s[29], s[27], s[26])
 
-    data = {
+    return {
         'line_power_connected_hours': line_power_connected_hours,
         'line_power_connected_count': line_power_connected_count,
         'heating_hours': heating_hours,
@@ -373,8 +368,6 @@ def parse_stats_response(s):
         'flame_lost': flame_lost,
         'reset_count': reset_count
     }
-
-    return data
 
 def prettify_key(key):
     return ' '.join(word.capitalize() for word in key.split('_'))
