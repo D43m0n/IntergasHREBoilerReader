@@ -103,7 +103,7 @@ class MQTTHandler:
 
         self.setup_done = False
         self.reconnect_count = 0
-        self.cached_values = {}  # Cache last published values to avoid sending out unnecessary messages to mqtt
+        self.cached_sensor_values = {}  # Cache last published values to avoid sending out unnecessary messages to mqtt
 
     def connect(self):
         try:
@@ -143,20 +143,14 @@ class MQTTHandler:
 
         # Register sensors
         for sensor_id, config in SENSORS.items():
-            sensor_config = {
-                "name": config['name'],
-                "unique_id": sensor_id,
-                "device_class": config['device_class'],
-                "state_class": config['state_class'],
-                "unit_of_measurement": config['unit_of_measurement'],
-                "state_topic": f"{MQTT_BASE_TOPIC}/{sensor_id}/state",
-                "availability_topic": f"{MQTT_BASE_TOPIC}/status",
-                "device": device_info
-            }
+            config["unique_id"] = sensor_id
+            config["device"] = device_info
+            config["state_topic"] = f"{MQTT_BASE_TOPIC}/{sensor_id}/state"
+            config["availability_topic"] = f"{MQTT_BASE_TOPIC}/status"
 
             self.client.publish(
                 f"{MQTT_DISCOVERY_PREFIX}/sensor/{DEVICE_ID}/{sensor_id}/config",
-                json.dumps(sensor_config),
+                json.dumps(config),
                 retain=True
             )
 
@@ -164,16 +158,16 @@ class MQTTHandler:
         """Publish boiler data to MQTT topics only when values change"""
         data_logger.debug(data)
 
-        for key in SENSORS.keys():
-            if key not in data:
-                logger.error(f"Missing data for sensor '{key}'")
+        for sensor_id in SENSORS.keys():
+            if sensor_id not in data:
+                logger.error(f"Missing data for sensor '{sensor_id}'")
                 continue
 
-            value = data[key]
-            topic = f"{MQTT_BASE_TOPIC}/{key}/state"
+            value = data[sensor_id]
+            topic = f"{MQTT_BASE_TOPIC}/{sensor_id}/state"
 
             current_state = str(value)
-            if key not in self.cached_values or current_state != self.cached_values[key]:
+            if sensor_id not in self.cached_sensor_values or current_state != self.cached_sensor_values[sensor_id]:
                 try:
                     result = self.client.publish(
                         topic,
@@ -183,7 +177,7 @@ class MQTTHandler:
                     )
 
                     if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                        self.cached_values[key] = current_state
+                        self.cached_sensor_values[sensor_id] = current_state
                         mqtt_logger.debug(f"{topic}: {current_state}")
                     else:
                         logger.error(f"Failed to publish to {topic}: {result.rc}")
