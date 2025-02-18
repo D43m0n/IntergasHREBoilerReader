@@ -157,6 +157,7 @@ class MQTTHandler:
         self.client.on_disconnect = self.on_disconnect
         self.client.will_set(f"{MQTT_BASE_TOPIC}/status", "offline", retain=True)
         self.client.reconnect_delay_set(min_delay=1, max_delay=300)
+        # self.client.enable_logger(logger)
 
         self.setup_done = False
         self.cached_sensor_values = {}  # Cache last published values to avoid sending out unnecessary messages to mqtt
@@ -184,7 +185,7 @@ class MQTTHandler:
         else:
             logger.error(f"Connection to MQTT broker failed with result code {rc}")
 
-    def on_disconnect(self, client, userdata, rc):
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         logger.info(f"Disconnected from MQTT broker")
 
     def setup_discovery(self):
@@ -480,6 +481,9 @@ def get_packet(port, mqtt_user, mqtt_password):
     mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
     mqtt_handler.connect()
     last_stats_time = 0
+    parsed_status_data = {}
+    parsed_status_extra_data = {}
+    parsed_stats_data = {}
 
     while True:  # outer serial reconnection loop
         try:
@@ -491,12 +495,16 @@ def get_packet(port, mqtt_user, mqtt_password):
                     data = ser.read(32)
                     if len(data) == 32:
                         parsed_status_data = parse_status_response(data)
+                    else:
+                        logger.error("Unexpected status response received: {len(data)} bytes")
 
                     # Retrieve status extra
                     ser.write(b'S2\r')
                     data = ser.read(32)
                     if len(data) == 32:
                         parsed_status_extra_data = parse_status_extra_response(data)
+                    else:
+                        logger.error("Unexpected status extra response received: {len(data)} bytes")
 
                     # Retrieve runtime stats every 60 seconds
                     current_time = time.time()
@@ -506,6 +514,8 @@ def get_packet(port, mqtt_user, mqtt_password):
                         data = ser.read(32)
                         if len(data) == 32:
                             parsed_stats_data = parse_stats_response(data)
+                        else:
+                            logger.error("Unexpected stats response received: {len(data)} bytes")
 
                     aggregated_data = parsed_status_data | parsed_status_extra_data | parsed_stats_data
                     display_readings(aggregated_data)
