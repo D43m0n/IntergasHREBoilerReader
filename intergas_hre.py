@@ -86,6 +86,61 @@ SENSORS = {
         "state_class": "total_increasing",
         "icon": "mdi:meter-gas",
         "accuracy_decimals": 3
+    },
+    "ionisation_current": {
+        "name": "Ionisation Current",
+        "device_class": "current",
+        "unit_of_measurement": "µA",
+        "state_class": "measurement",
+        "accuracy_decimals": 2
+    },
+    "alarm_status": {
+        "name": "Alarm Status",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None,
+        "icon": "mdi:alert-circle-outline"
+    },
+    "low_water_pressure": {
+        "name": "Low Water Pressure",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None,
+        "icon": "mdi:water-off"
+    },
+    "fault_code": {
+        "name": "Fault Code",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None,
+        "icon": "mdi:alert"
+    },
+    "heating_hours": {
+        "name": "Heating Hours",
+        "device_class": None,
+        "unit_of_measurement": "h",
+        "state_class": "total_increasing",
+        "icon": "mdi:clock"
+    },
+    "hot_water_hours": {
+        "name": "Hot Water Hours",
+        "device_class": None,
+        "unit_of_measurement": "h",
+        "state_class": "total_increasing",
+        "icon": "mdi:clock"
+    },
+    "tap_flow": {
+        "name": "Tap Flow",
+        "device_class": None,
+        "unit_of_measurement": "L/min",
+        "state_class": "measurement",
+        "icon": "mdi:water-pump"
+    },
+    "using_gas": {
+        "name": "Using Gas",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None
     }
 }
 
@@ -117,6 +172,8 @@ class MQTTHandler:
     def on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("Connected to MQTT broker successfully")
+            # Clear cached values on reconnect to force republishing sensor states
+            self.cached_sensor_values = {}
 
             if not self.setup_done:
                 self.setup_discovery()
@@ -179,8 +236,6 @@ class MQTTHandler:
                         mqtt_logger.debug(f"{topic}: {current_state}")
                     else:
                         logger.error(f"Failed to publish to {topic}: {result.rc}")
-                        if result.rc == mqtt.MQTT_ERR_NO_CONN:
-                            self.client.reconnect()
                 except Exception as e:
                     logger.error(f"Error publishing to {topic}: {str(e)}")  # bad payload, etc
 
@@ -277,7 +332,7 @@ def parse_status_response(s):
         # last known fault code
         fault_code = prettify_fault_code(s[29])
     else:
-        fault_code = "None"
+        fault_code = "No fault"
 
     # Outside temp sensor may not be available
     if outside_temp < -50:
@@ -294,6 +349,14 @@ def parse_status_response(s):
         231: "Central Heating ramp down",       # water recirculation after each heating period
     }
     status = status_codes.get(displ_code, f"Unknown ({displ_code})")
+
+    # determine gas consumption source to facilitate creating template sensors in HA
+    using_gas = "false"
+    if gas_valve:
+        if tap_switch:
+            using_gas = "hotwater"
+        else:
+            using_gas = "heating"
 
     return {
         'status': status,
@@ -326,6 +389,7 @@ def parse_status_response(s):
         'opentherm_disabled': opentherm_disabled,
         'burner_block': burner_block,
         'gradient_flag': gradient_flag,
+        'using_gas': using_gas,
         'byte_26_flags': f"{bin(s[26])[2:].zfill(8)}",
         'byte_27_flags': f"{bin(s[27])[2:].zfill(8)}",
         'byte_28_flags': f"{bin(s[28])[2:].zfill(8)}"
@@ -459,15 +523,14 @@ def get_packet(port, mqtt_user, mqtt_password):
             continue
 
 def make_general_logger():
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
     log_file = logging.FileHandler(LOG_FILE)
-    log_file.setLevel(logging.INFO)
+    log_file.setFormatter(formatter)
 
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.DEBUG)
-
-    formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    log_file.setFormatter(formatter)
     console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
 
     logger = logging.getLogger("logger")
     logger.setLevel(logging.DEBUG)
@@ -477,10 +540,8 @@ def make_general_logger():
     return logger
 
 def make_mqtt_logger():
-    log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=1)
-    log_file.setLevel(logging.DEBUG)
-
     formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=1)
     log_file.setFormatter(formatter)
 
     logger = logging.getLogger("mqtt_logger")
@@ -490,10 +551,8 @@ def make_mqtt_logger():
     return logger
 
 def make_data_logger():
-    log_file = RotatingFileHandler(LOG_FILE_DATA, maxBytes=10000000, backupCount=1)
-    log_file.setLevel(logging.DEBUG)
-
     formatter = logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    log_file = RotatingFileHandler(LOG_FILE_DATA, maxBytes=10000000, backupCount=1)
     log_file.setFormatter(formatter)
 
     logger = logging.getLogger("data_logger")
