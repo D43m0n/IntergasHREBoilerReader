@@ -140,7 +140,8 @@ SENSORS = {
         "name": "Using Gas",
         "device_class": None,
         "unit_of_measurement": None,
-        "state_class": None
+        "state_class": None,
+        "icon": "mdi:gas-burner"
     }
 }
 
@@ -496,7 +497,7 @@ def get_packet(port, mqtt_user, mqtt_password):
                     if len(data) == 32:
                         parsed_status_data = parse_status_response(data)
                     else:
-                        logger.error("Unexpected status response received: {len(data)} bytes")
+                        logger.error(f"Unexpected status response received: {len(data)} bytes")
 
                     # Retrieve status extra
                     ser.write(b'S2\r')
@@ -504,7 +505,7 @@ def get_packet(port, mqtt_user, mqtt_password):
                     if len(data) == 32:
                         parsed_status_extra_data = parse_status_extra_response(data)
                     else:
-                        logger.error("Unexpected status extra response received: {len(data)} bytes")
+                        logger.error(f"Unexpected status extra response received: {len(data)} bytes")
 
                     # Retrieve runtime stats every 60 seconds
                     current_time = time.time()
@@ -515,7 +516,7 @@ def get_packet(port, mqtt_user, mqtt_password):
                         if len(data) == 32:
                             parsed_stats_data = parse_stats_response(data)
                         else:
-                            logger.error("Unexpected stats response received: {len(data)} bytes")
+                            logger.error(f"Unexpected stats response received: {len(data)} bytes")
 
                     aggregated_data = parsed_status_data | parsed_status_extra_data | parsed_stats_data
                     display_readings(aggregated_data)

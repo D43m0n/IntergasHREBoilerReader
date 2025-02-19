@@ -2,9 +2,10 @@
 
 *Note: This project is under development. Some features may be incomplete or subject to change.*
 
-This is a fork of https://github.com/rixvet/IntergasBoilerReader where I have updated the python script to read data from an *Intergas Kombi Kompakt HRE 36/30*.
-
-Instead of writing to a local file I'm using MQTT to send the data directly to my local Home Assistant instance instead of writing to a file, where it can be discovered as a new device automatically.
+This started as a fork of https://github.com/rixvet/IntergasBoilerReader adapted to work with my *Intergas Kombi Kompakt HRE 36/30* boiler, but quickly grew up to a state where most of the code is new. Features:
+- Reads and displays in the console most of the known data available for the HRE boiler (state, extra state and runtime stats commands).
+- The relevant data is published to an MQTT broker as sensors bundled in a boiler device that is auto-discovered by Home Assistant.
+- Much improved error handling, data logging and reconnection logic.
 
 # Dependencies
 ```
