@@ -1,16 +1,19 @@
 # Intro
 
-*Note: This project is under development. Some features may be incomplete or subject to change.*
+This project started as a fork of https://github.com/rixvet/IntergasBoilerReader adapted to work with my *Intergas Kombi Kompakt HRE 36/30* boiler, but it quickly grew up to a state where most of the code is new. 
 
-This started as a fork of https://github.com/rixvet/IntergasBoilerReader adapted to work with my *Intergas Kombi Kompakt HRE 36/30* boiler, but quickly grew up to a state where most of the code is new. Features:
+Features:
 - Reads and displays in the console most of the known data available for the HRE boiler (state, extra state and runtime stats commands).
-- The relevant data is published to an MQTT broker as sensors bundled in a boiler device that is auto-discovered by Home Assistant.
+- The most relevant data is published to an MQTT broker as sensors bundled in a boiler device that is auto-discovered by Home Assistant.
 - Much improved error handling, data logging and reconnection logic.
+
+![Home Assistant device for the boiler](https://raw.githubusercontent.com/oscahie/IntergasHREBoilerReader/trunk/home_assistant.png)
 
 # Dependencies
 ```
-pip install pyserial paho-mqtt
+pip3 install pyserial paho-mqtt
 ```
+Note: Requires Python 3.9 or later.
 
 # Connection to the boiler
 
@@ -26,8 +29,30 @@ With the VCC jumper set to 5v. Do NOT connect the VCC wire however or the boiler
 
 # Usage
 
-I run this on a Raspberry Pi 3B+ permanently placed near the Intergas boiler.
+I run this on a Raspberry Pi 2B permanently mounted near the Intergas boiler.
 
-Edit the MQTT details, host, port and client ID in the python script. Then find out the associated serial port and run it, e.g.:
+Edit the MQTT details, host, port and client ID in the python script, and preferably create a new dedicated user in HA for this. Then find out the associated serial port for the USB device and run it, e.g.:
 
-`python intergas_hre.py --mqtt-user boiler --mqtt-password somepassword --port /dev/tty.usbserial-5`
+`python3 intergas_hre.py --mqtt-user <user> --mqtt-password <password> --port /dev/ttyUSB0`
+
+For 24x7 runnning and launching automatically after booting I created a new `systemd` service and rely on `screen` to handle persistent sessions that I can attach to if needed.
+
+`/etc/systemd/system/intergas-boiler.service`
+
+```
+[Unit]
+Description=Intergas HRE Boiler Monitoring
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/IntergasHREBoilerReader
+Type=simple
+ExecStart=/usr/bin/screen -DmS boiler /usr/bin/python3 /home/pi/IntergasHREBoilerReader/intergas_hre.py --mqtt-user <user> --mqtt-password <password> --port /dev/ttyUSB0
+ExecStop=/usr/bin/screen -S boiler -X quit
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
