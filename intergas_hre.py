@@ -299,7 +299,7 @@ def parse_status_response(s):
     temp_setpoint = getFloat(s[15], s[14])
     fan_speed_setpoint = getInt(s[17], s[16])
     fan_speed = getInt(s[19], s[18])
-    fan_pwm = getFloat(s[21], s[20])            # watts?
+    fan_pwm = getFloat(s[21], s[20]) * 10        # watts?
     ionisation_current = getFloat(s[23], s[22])
     displ_code = s[24]
 
@@ -417,7 +417,7 @@ def parse_stats_response(s):
     reset_count = getInt(s[15], s[14])
     gas_meter_heating = getFloat32(s[19], s[18], s[17], s[16]) / 100    # m3
     gas_meter_hot_water = getFloat32(s[23], s[22], s[21], s[20]) / 100  # m3
-    water_meter = getFloat24(s[28], s[25], s[24])
+    water_meter = getFloat24(s[28], s[25], s[24]) / 100                 # m3?
     burner_start_count_hot_water = getInt24(s[29], s[27], s[26])
 
     return {
@@ -427,8 +427,8 @@ def parse_stats_response(s):
         'hot_water_hours': hot_water_hours,
         'burner_start_count_heating': burner_start_count_heating,
         'burner_start_count_hot_water': burner_start_count_hot_water,
-        'gas_meter_heating': round(gas_meter_heating, 3),
-        'gas_meter_hot_water': round(gas_meter_hot_water, 3),
+        'gas_meter_heating': gas_meter_heating,
+        'gas_meter_hot_water': gas_meter_hot_water,
         'water_meter': water_meter,
         'ignition_failed': ignition_failed,
         'flame_lost': flame_lost,
