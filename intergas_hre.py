@@ -53,7 +53,7 @@ SENSORS = {
     },
     "fan_speed": {
         "name": "Burner Fan Speed",
-        "device_class": "speed",
+        "device_class": None,
         "unit_of_measurement": "rpm",
         "state_class": "measurement"
     },
@@ -89,7 +89,7 @@ SENSORS = {
     },
     "ionisation_current": {
         "name": "Ionisation Current",
-        "device_class": "current",
+        "device_class": None,
         "unit_of_measurement": "µA",
         "state_class": "measurement",
         "accuracy_decimals": 2
@@ -536,7 +536,7 @@ def get_packet(port, mqtt_user, mqtt_password):
 def make_general_logger():
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-    log_file = logging.FileHandler(LOG_FILE)
+    log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=2)
     log_file.setFormatter(formatter)
 
     console_handler = logging.StreamHandler()
