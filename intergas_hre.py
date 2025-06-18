@@ -536,7 +536,7 @@ def get_packet(port, mqtt_user, mqtt_password):
 def make_general_logger():
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-    log_file = RotatingFileHandler(LOG_FILE_MQTT, maxBytes=10000000, backupCount=2)
+    log_file = RotatingFileHandler(LOG_FILE, maxBytes=10000000, backupCount=2)
     log_file.setFormatter(formatter)
 
     console_handler = logging.StreamHandler()
