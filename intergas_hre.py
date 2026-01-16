@@ -166,7 +166,7 @@ SENSORS = {
         "icon": "mdi:water-pump"
     },
     "using_gas": {
-        "name": "Gas verbruik voor",
+        "name": "Gasklep stand",
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None,
