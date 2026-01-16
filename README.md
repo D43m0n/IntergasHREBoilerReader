@@ -17,15 +17,15 @@ Note: Requires Python 3.9 or later.
 
 # Connection to the boiler
 
-You'll need a FTDI USB to TTL serial device (e.g. I purchased [this one](https://es.aliexpress.com/item/1005006445462581.html)) and wire it to the boiler's X5 connector (using an ATX 4 pin plug like [this one](https://es.aliexpress.com/item/1005006821754564.html?)) following this schema:
+You'll need a FTDI USB to TTL serial device that **ensures galvanic isolation** (e.g. I purchased [this one](https://www.amazon.nl/dp/B07L2VLY5D?smid=A3U321I9X7C9XA&ref_=chk_typ_imgToDp&th=1) and wire it to the boiler's X5 connector (using an ATX 4 pin plug like [this one](https://es.aliexpress.com/item/1005006821754564.html?)) following this schema:
 
 FTDI TTL | X5 Interface
 ---------|-------------
-RX       | Rx
-TX       | Tx
-GND      | Gnd
+RX       | TXD
+TX       | RXD
+GND      | GND
 
-With the VCC jumper set to 5v. Do NOT connect the VCC wire however or the boiler will trip.
+You need to cross RX/TV from FTDI TTL to X5 interface. Set the VCC jumper to 5v. You don't need to connect the VCC wire from the X5 interface..
 
 # Usage
 
