@@ -29,56 +29,63 @@ LOG_FILE_DATA = "log_data.txt"
 
 SENSORS = {
     "flow_temp": {
-        "name": "Flow Temperature",
+        "name": "CV aanvoertemperatuur",
         "device_class": "temperature",
         "unit_of_measurement": "°C",
         "state_class": "measurement"
     },
     "return_temp": {
-        "name": "Return Temperature",
+        "name": "CV retourtemperatuur",
         "device_class": "temperature",
         "unit_of_measurement": "°C",
         "state_class": "measurement"
     },
     "hot_water_temp": {
-        "name": "Hot Water Temperature",
+        "name": "Tapwater temperatuur",
         "device_class": "temperature",
         "unit_of_measurement": "°C",
         "state_class": "measurement"
     },
     "room_thermostat": {
-        "name": "Kamerthermostaat",
+        "name": "Kamerthermostaat actief",
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None,
         "icon": "mdi:thermostat"
     },
     "temp_setpoint": {
-        "name": "Temperature Setpoint",
+        "name": "Gewenste setpoint",
         "device_class": "temperature",
         "unit_of_measurement": "°C",
         "state_class": "measurement"
     },
     "fan_speed": {
-        "name": "Burner Fan Speed",
+        "name": "Huidige ventilatorsnelheid",
         "device_class": None,
         "unit_of_measurement": "rpm",
         "state_class": "measurement"
     },
     "pump": {
-        "name": "CV pomp",
+        "name": "CV pomp actief",
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None,
         "icon": "mdi:pump"
     },
     "pump_speed": {
-        "name": "Pump Speed",
+        "name": "Pomp snelheid",
         "device_class": "power_factor",
         "unit_of_measurement": "%",
         "state_class": "measurement",
         "accuracy_decimals": 0,
         "icon": "mdi:pump"
+    },
+    "three_way_valve": {
+        "name": "3-wegklep actief",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None,
+        "icon": "mdi:valve"
     },
     "status": {
         "name": "Status",
@@ -87,7 +94,7 @@ SENSORS = {
         "state_class": None
     },
     "gas_meter_heating": {
-        "name": "Gas meter (verwarming)",
+        "name": "Gas verbruik CV",
         "device_class": "gas",
         "unit_of_measurement": "m³",
         "state_class": "total_increasing",
@@ -95,7 +102,7 @@ SENSORS = {
         "accuracy_decimals": 3
     },
     "gas_meter_hot_water": {
-        "name": "Gas meter (tap-water)",
+        "name": "Gas verbruik tapwater",
         "device_class": "gas",
         "unit_of_measurement": "m³",
         "state_class": "total_increasing",
@@ -103,7 +110,7 @@ SENSORS = {
         "accuracy_decimals": 3
     },
     "ionisation_current": {
-        "name": "Ionisation Current",
+        "name": "Ionisatiestroom",
         "device_class": None,
         "unit_of_measurement": "µA",
         "state_class": "measurement",
@@ -117,21 +124,21 @@ SENSORS = {
         "icon": "mdi:alert-circle-outline"
     },
     "low_water_pressure": {
-        "name": "Low Water Pressure",
+        "name": "Lage waterdruk",
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None,
         "icon": "mdi:water-off"
     },
     "pressure": {
-        "name": "Water Pressure",
+        "name": "Waterdruk",
         "device_class": "pressure",
         "unit_of_measurement": "bar",
         "state_class": "measurement",
         "icon": "mdi:water-opacity"
     },
     "fault_code": {
-        "name": "Fault Code",
+        "name": "Foutcode",
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None,
@@ -152,14 +159,14 @@ SENSORS = {
         "icon": "mdi:clock"
     },
     "tap_flow": {
-        "name": "Tap Flow",
+        "name": "Tapwater debiet",
         "device_class": None,
         "unit_of_measurement": "L/min",
         "state_class": "measurement",
         "icon": "mdi:water-pump"
     },
     "using_gas": {
-        "name": "Using Gas",
+        "name": "Gas verbruik voor",
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None,
@@ -365,11 +372,11 @@ def parse_status_response(s):
     # Add status code interpretation
     status_codes = {
         51: "Tapwater na-draaien",
-        0: "Central Heating active",
-        102: "CV bedrijf",    # anti-blockade run once every 24 hours
+        0: "CV bedrijf",
+        102: "Zelftest",    # anti-blockade run once every 24 hours
         126: "Idle",
         170: "Service mode",
-        204: "Tapwater actief",
+        204: "Tapwaterbedrijf",
         231: "CV na-draaien",       # water recirculation after each heating period
     }
     status = status_codes.get(displ_code, f"Unknown ({displ_code})")
@@ -378,9 +385,9 @@ def parse_status_response(s):
     using_gas = "false"
     if gas_valve:
         if tap_switch:
-            using_gas = "hotwater"
+            using_gas = "tapwater"
         else:
-            using_gas = "heating"
+            using_gas = "CV-bedrijf"
 
     return {
         'status': status,
