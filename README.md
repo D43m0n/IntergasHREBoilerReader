@@ -1,6 +1,6 @@
 # Intro
 
-This project started as a fork of https://github.com/rixvet/IntergasBoilerReader adapted to work with my *Intergas Kombi Kompakt HRE 36/30* boiler, but it quickly grew up to a state where most of the code is new. 
+This project started as a fork of https://github.com/rixvet/IntergasBoilerReader adapted to work with my *Intergas Kombi Kompakt HRE 36/30 A* boiler, but it quickly grew up to a state where most of the code is new. 
 
 Features:
 - Reads and displays in the console most of the known data available for the HRE boiler (state, extra state and runtime stats commands).
@@ -25,7 +25,7 @@ RX       | TXD
 TX       | RXD
 GND      | GND
 
-You need to cross RX/TV from FTDI TTL to X5 interface. Set the VCC jumper to 5v. You don't need to connect the VCC wire from the X5 interface..
+You need to cross RX/TX from FTDI TTL to X5 interface. Set the VCC jumper to 5v. You don't need to connect the VCC wire from the X5 interface..
 
 # Usage
 
