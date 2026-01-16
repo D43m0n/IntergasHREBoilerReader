@@ -108,6 +108,13 @@ SENSORS = {
         "state_class": None,
         "icon": "mdi:water-off"
     },
+    "pressure": {
+        "name": "Water Pressure",
+        "device_class": "pressure",
+        "unit_of_measurement": "bar",
+        "state_class": "measurement",
+        "icon": "mdi:water-opacity"
+    },
     "fault_code": {
         "name": "Fault Code",
         "device_class": None,
