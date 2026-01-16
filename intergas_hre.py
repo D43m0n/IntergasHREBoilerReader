@@ -46,6 +46,13 @@ SENSORS = {
         "unit_of_measurement": "°C",
         "state_class": "measurement"
     },
+    "room_thermostat": {
+        "name": "Kamerthermostaat",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None,
+        "icon": "mdi:thermostat"
+    },
     "temp_setpoint": {
         "name": "Temperature Setpoint",
         "device_class": "temperature",
@@ -57,6 +64,13 @@ SENSORS = {
         "device_class": None,
         "unit_of_measurement": "rpm",
         "state_class": "measurement"
+    },
+    "pump": {
+        "name": "CV pomp",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None,
+        "icon": "mdi:pump"
     },
     "pump_speed": {
         "name": "Pump Speed",
@@ -73,7 +87,7 @@ SENSORS = {
         "state_class": None
     },
     "gas_meter_heating": {
-        "name": "Gas meter (heating)",
+        "name": "Gas meter (verwarming)",
         "device_class": "gas",
         "unit_of_measurement": "m³",
         "state_class": "total_increasing",
@@ -81,7 +95,7 @@ SENSORS = {
         "accuracy_decimals": 3
     },
     "gas_meter_hot_water": {
-        "name": "Gas meter (hot water)",
+        "name": "Gas meter (tap-water)",
         "device_class": "gas",
         "unit_of_measurement": "m³",
         "state_class": "total_increasing",
@@ -124,14 +138,14 @@ SENSORS = {
         "icon": "mdi:alert"
     },
     "heating_hours": {
-        "name": "Heating Hours",
+        "name": "Branduren CV",
         "device_class": None,
         "unit_of_measurement": "h",
         "state_class": "total_increasing",
         "icon": "mdi:clock"
     },
     "hot_water_hours": {
-        "name": "Hot Water Hours",
+        "name": "Branduren tapwater",
         "device_class": None,
         "unit_of_measurement": "h",
         "state_class": "total_increasing",
@@ -350,13 +364,13 @@ def parse_status_response(s):
 
     # Add status code interpretation
     status_codes = {
-        51: "Hot water ramp down",
+        51: "Tapwater na-draaien",
         0: "Central Heating active",
-        102: "Central Heating health-check",    # anti-blockade run once every 24 hours
+        102: "CV bedrijf",    # anti-blockade run once every 24 hours
         126: "Idle",
         170: "Service mode",
-        204: "Hot water active",
-        231: "Central Heating ramp down",       # water recirculation after each heating period
+        204: "Tapwater actief",
+        231: "CV na-draaien",       # water recirculation after each heating period
     }
     status = status_codes.get(displ_code, f"Unknown ({displ_code})")
 
@@ -387,7 +401,7 @@ def parse_status_response(s):
         'alarm_status': alarm_status,
         'fault_code': fault_code,
         'pressure_sensor': pressure_sensor,
-        'pressure': water_pressure,
+        'pressure': round(water_pressure, 1),
         'low_water_pressure': low_water_pressure,
         'gp_switch': gp_switch,
         'tap_switch': tap_switch,
