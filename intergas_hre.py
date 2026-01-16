@@ -17,7 +17,7 @@ MQTT_DISCOVERY_PREFIX = "homeassistant"
 
 DEVICE_ID = "intergas_boiler"
 DEVICE_NAME = "Intergas Boiler"
-DEVICE_MODEL = "Kombi Kompakt HRE 36/30"
+DEVICE_MODEL = "Kombi Kompakt HRE 36/30 A"
 DEVICE_MANUFACTURER = "Intergas"
 
 MQTT_BASE_TOPIC = f"boiler/{DEVICE_ID}"
