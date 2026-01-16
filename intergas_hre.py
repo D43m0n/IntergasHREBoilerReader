@@ -150,7 +150,7 @@ class MQTTHandler:
         logger.info("Initializing MQTT client...")
         self.client = mqtt.Client(
             client_id=MQTT_CLIENT_ID,
-            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+#            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             reconnect_on_failure=True
         )
         self.client.username_pw_set(mqtt_user, mqtt_password)
