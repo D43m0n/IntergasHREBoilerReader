@@ -80,6 +80,14 @@ SENSORS = {
         "accuracy_decimals": 0,
         "icon": "mdi:pump"
     },
+    "fan_pwm": {
+        "name": "Fan pwm",
+        "device_class": "power_factor",
+        "unit_of_measurement": "%",
+        "state_class": "measurement",
+        "accuracy_decimals": 0,
+        "icon": "mdi:fan-auto"
+    },
     "three_way_valve": {
         "name": "3-wegklep actief",
         "device_class": None,
@@ -167,6 +175,13 @@ SENSORS = {
     },
     "using_gas": {
         "name": "Gasklep stand",
+        "device_class": None,
+        "unit_of_measurement": None,
+        "state_class": None,
+        "icon": "mdi:gas-burner"
+    },
+    "burner_block": {
+        "name": "Branderautomaat",
         "device_class": None,
         "unit_of_measurement": None,
         "state_class": None,
