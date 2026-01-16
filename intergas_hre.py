@@ -10,7 +10,8 @@ from struct import *
 from logging.handlers import RotatingFileHandler
 
 # MQTT Settings
-MQTT_BROKER = "homeassistant.local"
+#MQTT_BROKER = "homeassistant.local"
+MQTT_BROKER = "192.168.1.2"
 MQTT_PORT = 1883
 MQTT_CLIENT_ID = "intergas_boiler"
 MQTT_DISCOVERY_PREFIX = "homeassistant"
