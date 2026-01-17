@@ -179,13 +179,6 @@ SENSORS = {
         "unit_of_measurement": None,
         "state_class": None,
         "icon": "mdi:gas-burner"
-    },
-    "burner_block": {
-        "name": "Branderautomaat",
-        "device_class": None,
-        "unit_of_measurement": None,
-        "state_class": None,
-        "icon": "mdi:gas-burner"
     }
 }
 
