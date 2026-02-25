@@ -6,6 +6,7 @@ import sys
 import time
 import json
 import paho.mqtt.client as mqtt
+import threading # heartbeat
 from struct import *
 from logging.handlers import RotatingFileHandler
 
@@ -179,13 +180,6 @@ SENSORS = {
         "unit_of_measurement": None,
         "state_class": None,
         "icon": "mdi:gas-burner"
-    },
-    "burner_block": {
-        "name": "Branderautomaat",
-        "device_class": None,
-        "unit_of_measurement": None,
-        "state_class": None,
-        "icon": "mdi:gas-burner"
     }
 }
 
@@ -211,6 +205,7 @@ class MQTTHandler:
         try:
             self.client.connect(MQTT_BROKER, MQTT_PORT)
             self.client.loop_start()
+            self.start_heartbeat(interval=60)
         except Exception as e:
             logger.error(f"MQTT Connection failed: {str(e)}")
             sys.exit(1)
@@ -254,6 +249,21 @@ class MQTTHandler:
                 json.dumps(config),
                 retain=True
             )
+
+    def start_heartbeat(self, interval=60):
+        def heartbeat():
+            while True:
+                if self.client.is_connected():
+                    self.client.publish(
+                        f"{MQTT_BASE_TOPIC}/status",
+                        "online",
+                        retain=True,
+                        qos=1
+                    )
+                time.sleep(interval)
+
+        thread = threading.Thread(target=heartbeat, daemon=True)
+        thread.start()
 
     def publish_data(self, data):
         """Publish boiler data to MQTT topics only when values change"""
