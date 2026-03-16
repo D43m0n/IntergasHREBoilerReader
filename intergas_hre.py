@@ -287,9 +287,14 @@ class MQTTHandler:
                 if age > timeout:
                     logger.error("MQTT publish stalled — forcing reconnect")
                     try:
+                        logger.warning("Restarting MQTT client loop")
+                        self.client.loop_stop()
                         self.client.disconnect()
+                        
                         time.sleep(2)
+
                         self.client.reconnect()
+                        self.client.loop_start()
                     except Exception as e:
                         logger.error(f"MQTT reconnect failed: {e}")
 
