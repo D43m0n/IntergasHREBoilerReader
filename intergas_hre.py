@@ -295,6 +295,9 @@ class MQTTHandler:
 
                         self.client.reconnect()
                         self.client.loop_start()
+                        # reset state
+                        self.cached_sensor_values = {}
+                        self.setup_done = False
                     except Exception as e:
                         logger.error(f"MQTT reconnect failed: {e}")
 
