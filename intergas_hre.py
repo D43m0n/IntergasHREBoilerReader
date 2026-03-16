@@ -191,12 +191,17 @@ class MQTTHandler:
 #            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             reconnect_on_failure=True
         )
+        self.client.max_queued_messages_set(0)
+        self.client.max_inflight_messages_set(20)
         self.client.username_pw_set(mqtt_user, mqtt_password)
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
         self.client.will_set(f"{MQTT_BASE_TOPIC}/status", "offline", retain=True)
         self.client.reconnect_delay_set(min_delay=1, max_delay=300)
         # self.client.enable_logger(logger)
+
+        self.connected = False
+        self.last_publish_time = time.time()
 
         self.setup_done = False
         self.cached_sensor_values = {}  # Cache last published values to avoid sending out unnecessary messages to mqtt
@@ -206,6 +211,7 @@ class MQTTHandler:
             self.client.connect(MQTT_BROKER, MQTT_PORT, 60)
             self.client.loop_start()
             self.start_heartbeat(interval=60)
+            self.start_watchdog()
         except Exception as e:
             logger.error(f"MQTT Connection failed: {str(e)}")
             print(f"MQTT connect failed: {e}")
@@ -214,6 +220,7 @@ class MQTTHandler:
     def on_connect(self, client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("Connected to MQTT broker successfully")
+            self.connected = True
             # Clear cached values on reconnect to force republishing sensor states
             self.cached_sensor_values = {}
 
@@ -222,13 +229,14 @@ class MQTTHandler:
                 self.setup_done = True
 
             # Publish online status
-            self.client.publish(f"{MQTT_BASE_TOPIC}/status", "online", retain=True, qos=1)
+            result = self.client.publish(f"{MQTT_BASE_TOPIC}/status", "online", retain=True, qos=1)
         else:
             logger.error(f"Connection to MQTT broker failed with result code {rc}")
 
     def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         logger.warning(f"Disconnected from MQTT broker: {reason_code}")
         print(f"Disconnected from MQTT broker: {reason_code}")
+        self.connected = False
 
     def setup_discovery(self):
         """Setup device and sensors discovery"""
@@ -255,8 +263,8 @@ class MQTTHandler:
     def start_heartbeat(self, interval=60):
         def heartbeat():
             while True:
-                if self.client.is_connected():
-                    self.client.publish(
+                if self.connected:
+                    result = self.client.publish(
                         f"{MQTT_BASE_TOPIC}/status",
                         "online",
                         retain=True,
@@ -265,6 +273,27 @@ class MQTTHandler:
                 time.sleep(interval)
 
         thread = threading.Thread(target=heartbeat, daemon=True)
+        thread.start()
+
+    def start_watchdog(self, timeout=120):
+        def watchdog():
+            while True:
+                time.sleep(30)
+                if not self.client.is_connected():
+                    continue
+
+                age = time.time() - self.last_publish_time
+
+                if age > timeout:
+                    logger.error("MQTT publish stalled — forcing reconnect")
+                    try:
+                        self.client.disconnect()
+                        time.sleep(2)
+                        self.client.reconnect()
+                    except Exception as e:
+                        logger.error(f"MQTT reconnect failed: {e}")
+
+        thread = threading.Thread(target=watchdog, daemon=True)
         thread.start()
 
     def publish_data(self, data):
@@ -291,6 +320,7 @@ class MQTTHandler:
 
                     if result.rc == mqtt.MQTT_ERR_SUCCESS:
                         self.cached_sensor_values[sensor_id] = current_state
+                        self.last_publish_time = time.time()
                         mqtt_logger.debug(f"{topic}: {current_state}")
                     else:
                         logger.error(f"Failed to publish to {topic}: {result.rc}")
