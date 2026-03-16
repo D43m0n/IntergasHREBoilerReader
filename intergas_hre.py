@@ -576,33 +576,41 @@ def get_packet(port, mqtt_user, mqtt_password):
         try:
             with serial.Serial(port, 9600, timeout=2) as ser:
                 logger.info(f"Connected to {port}")
+                ser.reset_input_buffer()
+                ser.reset_output_buffer()
                 while True:
                     # Retrieve status
                     ser.write(b'S?\r')
+                    time.sleep(0.05)
                     data = ser.read(32)
-                    if len(data) == 32:
-                        parsed_status_data = parse_status_response(data)
-                    else:
+                    if len(data) != 32:
                         logger.error(f"Unexpected status response received: {len(data)} bytes")
+                        ser.reset_input_buffer()
+                        continue
+                    parsed_status_data = parse_status_response(data)
 
                     # Retrieve status extra
                     ser.write(b'S2\r')
+                    time.sleep(0.05)
                     data = ser.read(32)
-                    if len(data) == 32:
-                        parsed_status_extra_data = parse_status_extra_response(data)
-                    else:
+                    if len(data) != 32:
                         logger.error(f"Unexpected status extra response received: {len(data)} bytes")
+                        ser.reset_input_buffer()
+                        continue
+                    parsed_status_extra_data = parse_status_extra_response(data)
 
                     # Retrieve runtime stats every 60 seconds
                     current_time = time.time()
                     if current_time - last_stats_time >= 60:
                         last_stats_time = current_time
                         ser.write(b'HN\r')
+                        time.sleep(0.05)
                         data = ser.read(32)
-                        if len(data) == 32:
-                            parsed_stats_data = parse_stats_response(data)
-                        else:
+                        if len(data) != 32:
                             logger.error(f"Unexpected stats response received: {len(data)} bytes")
+                            ser.reset_input_buffer()
+                            continue
+                        parsed_stats_data = parse_stats_response(data)
 
                     aggregated_data = parsed_status_data | parsed_status_extra_data | parsed_stats_data
                     display_readings(aggregated_data)
