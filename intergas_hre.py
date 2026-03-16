@@ -565,14 +565,15 @@ def display_readings(data):
     print("\nPress Ctrl+C to stop...")
 
 def get_packet(port, mqtt_user, mqtt_password):
-    mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
-    mqtt_handler.connect()
-    last_stats_time = 0
-    parsed_status_data = {}
-    parsed_status_extra_data = {}
-    parsed_stats_data = {}
 
     while True:  # outer serial reconnection loop
+        mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
+        mqtt_handler.connect()
+        last_stats_time = 0
+        parsed_status_data = {}
+        parsed_status_extra_data = {}
+        parsed_stats_data = {}
+
         try:
             with serial.Serial(port, 9600, timeout=2) as ser:
                 logger.info(f"Connected to {port}")
@@ -620,7 +621,7 @@ def get_packet(port, mqtt_user, mqtt_password):
 
         except serial.SerialException as e:
             logger.error(f"Serial connection lost: {e}")
-            time.sleep(10)
+            time.sleep(5)
             continue
         except Exception as e:
             logger.exception(f"Fatal error: {e}")
