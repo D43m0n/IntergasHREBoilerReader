@@ -203,11 +203,12 @@ class MQTTHandler:
 
     def connect(self):
         try:
-            self.client.connect(MQTT_BROKER, MQTT_PORT)
+            self.client.connect(MQTT_BROKER, MQTT_PORT, 60)
             self.client.loop_start()
             self.start_heartbeat(interval=60)
         except Exception as e:
             logger.error(f"MQTT Connection failed: {str(e)}")
+            print(f"MQTT connect failed: {e}")
             sys.exit(1)
 
     def on_connect(self, client, userdata, flags, rc, properties=None):
@@ -226,7 +227,8 @@ class MQTTHandler:
             logger.error(f"Connection to MQTT broker failed with result code {rc}")
 
     def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
-        logger.info(f"Disconnected from MQTT broker")
+        logger.warning(f"Disconnected from MQTT broker: {reason_code}")
+        print(f"Disconnected from MQTT broker: {reason_code}")
 
     def setup_discovery(self):
         """Setup device and sensors discovery"""
@@ -583,9 +585,8 @@ def get_packet(port, mqtt_user, mqtt_password):
             time.sleep(10)
             continue
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            time.sleep(10)
-            continue
+            logger.exception(f"Fatal error: {e}")
+            sys.exit(1)
 
 def make_general_logger():
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
