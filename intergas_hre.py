@@ -233,10 +233,11 @@ class MQTTHandler:
         else:
             logger.error(f"Connection to MQTT broker failed with result code {rc}")
 
-    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
-        logger.warning(f"Disconnected from MQTT broker: {reason_code}")
-        print(f"Disconnected from MQTT broker: {reason_code}")
-        self.connected = False
+    def on_disconnect(self, client, userdata, disconnect_flags):
+        if rc != 0:
+            logger.warning(f"Disconnected from MQTT broker: {rc}")
+            print(f"Disconnected from MQTT broker: {rc}")
+            self.connected = False
 
     def setup_discovery(self):
         """Setup device and sensors discovery"""
