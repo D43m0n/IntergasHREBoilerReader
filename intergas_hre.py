@@ -574,6 +574,8 @@ def display_readings(data):
     print("\nPress Ctrl+C to stop...")
 
 def get_packet(port, mqtt_user, mqtt_password):
+    max_serial_retries = 5  # Maximum aantal pogingen om de seriepoort te herstellen
+    serial_retry_delay = 10  # Seconden tussen pogingen
 
     while True:  # outer serial reconnection loop
         mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
@@ -584,54 +586,60 @@ def get_packet(port, mqtt_user, mqtt_password):
         parsed_stats_data = {}
 
         try:
-            with serial.Serial(port, 9600, timeout=2) as ser:
-                logger.info(f"Connected to {port}")
-                ser.reset_input_buffer()
-                ser.reset_output_buffer()
-                while True:
-                    # Retrieve status
-                    ser.write(b'S?\r')
-                    time.sleep(0.05)
-                    data = ser.read(32)
-                    if len(data) != 32:
-                        logger.error(f"Unexpected status response received: {len(data)} bytes")
+            for attempt in range(max_serial_retries):
+                try:
+                    with serial.Serial(port, 9600, timeout=2) as ser:
+                        logger.info(f"Connected to {port}")
                         ser.reset_input_buffer()
-                        continue
-                    parsed_status_data = parse_status_response(data)
+                        ser.reset_output_buffer()
+                        while True:
+                            # Retrieve status
+                            ser.write(b'S?\r')
+                            time.sleep(0.1)
+                            data = ser.read(32)
+                            if len(data) != 32:
+                                logger.error(f"Unexpected status response received: {len(data)} bytes")
+                                ser.reset_input_buffer()
+                                continue
+                            parsed_status_data = parse_status_response(data)
 
-                    # Retrieve status extra
-                    ser.write(b'S2\r')
-                    time.sleep(0.05)
-                    data = ser.read(32)
-                    if len(data) != 32:
-                        logger.error(f"Unexpected status extra response received: {len(data)} bytes")
-                        ser.reset_input_buffer()
-                        continue
-                    parsed_status_extra_data = parse_status_extra_response(data)
+                            # Retrieve status extra
+                            ser.write(b'S2\r')
+                            time.sleep(0.1)
+                            data = ser.read(32)
+                            if len(data) != 32:
+                                logger.error(f"Unexpected status extra response received: {len(data)} bytes")
+                                ser.reset_input_buffer()
+                                continue
+                            parsed_status_extra_data = parse_status_extra_response(data)
 
-                    # Retrieve runtime stats every 60 seconds
-                    current_time = time.time()
-                    if current_time - last_stats_time >= 60:
-                        last_stats_time = current_time
-                        ser.write(b'HN\r')
-                        time.sleep(0.05)
-                        data = ser.read(32)
-                        if len(data) != 32:
-                            logger.error(f"Unexpected stats response received: {len(data)} bytes")
-                            ser.reset_input_buffer()
-                            continue
-                        parsed_stats_data = parse_stats_response(data)
+                            # Retrieve runtime stats every 60 seconds
+                            current_time = time.time()
+                            if current_time - last_stats_time >= 60:
+                                last_stats_time = current_time
+                                ser.write(b'HN\r')
+                                time.sleep(0.1)
+                                data = ser.read(32)
+                                if len(data) != 32:
+                                    logger.error(f"Unexpected stats response received: {len(data)} bytes")
+                                    ser.reset_input_buffer()
+                                    continue
+                                parsed_stats_data = parse_stats_response(data)
 
-                    aggregated_data = parsed_status_data | parsed_status_extra_data | parsed_stats_data
-                    display_readings(aggregated_data)
-                    mqtt_handler.publish_data(aggregated_data)
+                            aggregated_data = parsed_status_data | parsed_status_extra_data | parsed_stats_data
+                            display_readings(aggregated_data)
+                            mqtt_handler.publish_data(aggregated_data)
 
-                    time.sleep(2)
+                            time.sleep(2)
 
-        except serial.SerialException as e:
-            logger.error(f"Serial connection lost: {e}")
-            time.sleep(5)
-            continue
+                except serial.SerialException as e:
+                    logger.error(f"Serial connection lost (attempt {attempt + 1}/{max_serial_retries}): {e}")
+                    if attempt == max_serial_retries - 1:
+                        logger.error("Max serial retries reached. Exiting.")
+                        sys.exit(1)
+                    time.sleep(serial_retry_delay)
+                    continue
+
         except Exception as e:
             logger.exception(f"Fatal error: {e}")
             sys.exit(1)
