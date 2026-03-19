@@ -233,11 +233,16 @@ class MQTTHandler:
         else:
             logger.error(f"Connection to MQTT broker failed with result code {rc}")
 
-    def on_disconnect(self, client, userdata, disconnect_flags):
-        if rc != 0:
-            logger.warning(f"Disconnected from MQTT broker: {rc}")
-            print(f"Disconnected from MQTT broker: {rc}")
-            self.connected = False
+    def on_disconnect(self, client, userdata, rc):
+        logger.warning(f"MQTT disconnected (result code: {rc}), attempting to reconnect...")
+        while True:
+            try:
+                client.reconnect()
+                logger.info("MQTT reconnected successfully.")
+                break
+            except Exception as e:
+                logger.error(f"Failed to reconnect to MQTT: {e}, retrying in 10 seconds...")
+                time.sleep(10)
 
     def setup_discovery(self):
         """Setup device and sensors discovery"""
@@ -294,13 +299,16 @@ class MQTTHandler:
                         
                         time.sleep(2)
 
-                        self.client.reconnect()
-                        self.client.loop_start()
-                        # reset state
-                        self.cached_sensor_values = {}
-                        self.setup_done = False
+                        try:
+                            self.client.reconnect()
+                            self.client.loop_start()
+                            # reset state
+                            self.cached_sensor_values = {}
+                            self.setup_done = False
+                        except Exception as reconnect_error:
+                            logger.error(f"MQTT reconnect failed: {reconnect_error}")
                     except Exception as e:
-                        logger.error(f"MQTT reconnect failed: {e}")
+                        logger.error(f"Error during MQTT restart: {e}")
 
         thread = threading.Thread(target=watchdog, daemon=True)
         thread.start()
