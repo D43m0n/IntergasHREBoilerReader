@@ -582,8 +582,8 @@ def display_readings(data):
     print("\nPress Ctrl+C to stop...")
 
 def get_packet(port, mqtt_user, mqtt_password):
-    max_serial_retries = 5  # Maximum aantal pogingen om de seriepoort te herstellen
-    serial_retry_delay = 10  # Seconden tussen pogingen
+    max_serial_retries = 5  # Maximum number of retries to restore communication with serial port
+    serial_retry_delay = 10  # Seconds between retries
 
     while True:  # outer serial reconnection loop
         mqtt_handler = MQTTHandler(mqtt_user, mqtt_password)
